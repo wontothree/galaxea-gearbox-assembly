@@ -112,3 +112,13 @@ python -m pip install -e source/Galaxea_Lab_External
 cd source/
 ls
 cd gearboxAssembly/
+cd source
+ls
+cd gearboxAssembly/
+exit
+python -m pip install -e source/Galaxea_Lab_External
+cd source/
+ls
+cd gearboxAssembly/
+python -m pip install -e source/Galaxea_Lab_External
+exit
