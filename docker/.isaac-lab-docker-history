@@ -1,0 +1,114 @@
+docker cp isaac-lab-base:/workspace/isaaclab/logs .
+docker compose version
+deactivate
+ls
+exit
+python docker/container.py start
+cat /proc/1/cgroup
+exit
+git config
+isaaclab -p scripts/tutorials/00_sim/log_time.py --headless
+isaaclab -p scripts/tutorials/00_sim/log_time.py -
+cd ..
+ls
+exit
+cd ..
+ls
+exit
+ls
+cd source/
+ls
+exit
+ls
+cd source/
+ls
+cd gearboxAssembly/
+python -m pip install -e source/Galaxea_Lab_External
+/workspace/isaaclab/_isaac_sim/kit/python/bin/python3 -m pip install --upgrade pip
+python -m pip install -e source/Galaxea_Lab_External
+python scripts/list_envs.py
+python scripts/zero_agent.py --task=Template-Galaxea-Lab-External-Direct-v0
+isaaclab -p scripts/tutorials/00_sim/log_time.py
+exit
+cd source/
+ls
+cd gearboxAssembly/
+ls
+ps
+grep
+top
+htop
+kill 1757
+top
+kill -9 1757
+kill -9 2267
+d
+ls
+py
+ls
+cd source/
+ls
+cd gearboxAssembly/
+python scripts/list_envs.py 
+python scripts/random_agent.py --task=Template-Galaxea-Lab-External-Direct-v0
+python scripts/random_agent.py --task=Template-Galaxea-Lab-External-Direct-v0
+ls
+cd source/
+ls
+cd gearboxAssembly/
+ls
+code .
+sudo code .
+apt install code
+ls
+vim scripts/rule_based_agent.py 
+vi scripts/rule_based_agent.py 
+nano scripts/rule_based_agent.py 
+sudo apt-get install vim
+apt-get install vim
+apt-get update
+apt-get install vim
+apt-get install code
+vim scripts/rule_based_agent.py 
+vim
+vi
+apt-get upgrade
+sudo apt-get upgrade
+lsb_release -a
+export TZ="Asial/Seoul"
+apt-get upgrade
+tzdata
+apt-get install tzdata
+dpkg-reconfigure --frontend noninteractive tzdata
+export DEBIAN_FRONTEND=noninteractive
+apt-get install -y tzdata
+time
+ls -a /etc/localtime
+ls -alh /etc/localtime
+cat /etc/localtime
+top
+kill -9 3488
+python scripts/random_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras
+kill -9 5767
+python scripts/random_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera
+kill -9 4485
+python scripts/random_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras
+ls
+cd source/
+ls
+cd gearboxAssembly/
+python scripts/random_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras
+python -m pip install -e source/Galaxea_Lab_External
+/workspace/isaaclab/_isaac_sim/kit/python/bin/python3 -m pip install --upgrade pip
+python -m pip install -e source/Galaxea_Lab_External
+python scripts/random_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras
+sudo python3 docker/container.py enter
+python -m pip install -e source/Galaxea_Lab_External
+cd srou
+cd source/
+ls
+cd gearboxAssembly/
+python -m pip install -e source/Galaxea_Lab_External
+cd source/
+ls
+cd gearboxAssembly/
