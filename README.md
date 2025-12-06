@@ -1,9 +1,13 @@
 # Gearbox Assembly by Galaxea R1
 
+![RoCo Challenge Poster](docs/images/poster.png)
+[RoCo Challenge@AAAI 2026](https://rocochallenge.github.io/RoCo2026/doc.html)
+
 ## Getting Started on Docker
 
 ```bash
-./docker/container.py enter
+cd source/gearboxAssembly
+python -m pip install -e source/Galaxea_Lab_External
 ```
 
 ```bash
