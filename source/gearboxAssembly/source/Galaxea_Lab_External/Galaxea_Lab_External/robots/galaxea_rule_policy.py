@@ -34,8 +34,7 @@ from isaaclab.sim.spawners.materials import spawn_rigid_body_material
 from isaaclab.sim import SimulationContext
 
 class GalaxeaRulePolicy:
-    def __init__(self, sim: sim_utils.SimulationContext, scene: InteractiveScene,
-    obj_dict: dict):
+    def __init__(self, sim: sim_utils.SimulationContext, scene: InteractiveScene, obj_dict: dict):
         self.sim = sim
         self.scene = scene
         # self.arm_name = arm_name
@@ -228,7 +227,7 @@ class GalaxeaRulePolicy:
         return diff_ik_controller, arm_entity_cfg, gripper_entity_cfg
         
 
-
+    # End Effector Control by Differential Inverse Kinematics
     def move_robot_to_position(self,
                             arm_entity_cfg: SceneEntityCfg,
                             gripper_entity_cfg: SceneEntityCfg,
