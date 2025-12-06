@@ -122,3 +122,12 @@ ls
 cd gearboxAssembly/
 python -m pip install -e source/Galaxea_Lab_External
 exit
+cd ..
+[200~cd ~/galazear1-gearbox-assembly~
+cd ~/galazear1-gearbox-assembly
+cd ~/galaxear1-gearbox-assembly
+ls
+cd source/gearboxAssembly
+cd source/gearboxAssembly/
+python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras
+python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras
