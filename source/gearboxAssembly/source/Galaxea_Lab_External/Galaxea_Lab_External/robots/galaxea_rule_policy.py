@@ -40,8 +40,8 @@ class GalaxeaRulePolicy:
         # self.arm_name = arm_name
         self.device = sim.device
 
+        # Object state
         self.obj_dict = obj_dict
-
         self.planetary_carrier = obj_dict["planetary_carrier"]
         self.ring_gear = obj_dict["ring_gear"]
         self.sun_planetary_gear_1 = obj_dict["sun_planetary_gear_1"]
@@ -50,7 +50,7 @@ class GalaxeaRulePolicy:
         self.sun_planetary_gear_4 = obj_dict["sun_planetary_gear_4"]
         self.planetary_reducer = obj_dict["planetary_reducer"]
 
-        # Define pin positions in local coordinates (relative to planetary carrier)
+        # Define pin positions in local coordinates relative to planetary carrier
         self.pin_local_positions = [
             torch.tensor([0.0, -0.054, 0.0], device=self.device),      # pin_0
             torch.tensor([0.0465, 0.0268, 0.0], device=self.device),   # pin_1
@@ -225,7 +225,6 @@ class GalaxeaRulePolicy:
         # gripper_entity_cfg.resolve(self.scene)
         
         return diff_ik_controller, arm_entity_cfg, gripper_entity_cfg
-        
 
     # End Effector Control by Differential Inverse Kinematics
     def move_robot_to_position(self,
@@ -289,8 +288,7 @@ class GalaxeaRulePolicy:
         
 
 
-    def prepare_mounting_plan(self,
-                            gear_names: list = None):
+    def prepare_mounting_plan(self, gear_names: list = None):
         """
         Plan which gear mounts to which arm and which pin by finding the nearest arm and pin for each gear.
         Each pin can only be used once.
@@ -320,8 +318,7 @@ class GalaxeaRulePolicy:
         planetary_carrier_quat = root_state[:, 3:7].clone()
         num_envs = planetary_carrier_pos.shape[0]
 
-
-        # Calculate world positions of all pins
+        # Calculate world positions of all pins in planetary carrier
         pin_world_positions = []
         pin_world_quats = []
         for pin_local_pos in self.pin_local_positions:
@@ -685,7 +682,6 @@ class GalaxeaRulePolicy:
 
         # Pick up the 1st gear
         if self.count >= self.count_step_1[0] and self.count < self.count_step_1[-1]:
-        
             gear_id = 1
             current_arm_str = self.gear_to_pin_map[f"sun_planetary_gear_{gear_id}"]['arm']
             if current_arm_str == 'left':
@@ -818,4 +814,49 @@ class GalaxeaRulePolicy:
                 current_gripper = self.left_gripper_entity_cfg
             action, joint_ids = self.mount_gear_to_planetary_carrier(gear_id, self.count_step_13, current_arm, current_gripper)
 
+        self.print_inner_state()
+
         return action, joint_ids
+
+    # ...
+    def print_inner_state(self):
+        # Initial object state [x, y, z, q_w, q_x, q_y, q_z, v_x, v_y, v_z, w_x, w_y, w_z]
+        # self.initial_root_state
+
+        # Current object state
+        # self.planetary_carrier
+        # self.ring_gear
+        # self.sun_planetary_gear_1
+        # self.sun_planetary_gear_2
+        # self.sun_planetary_gear_3
+        # self.sun_planetary_gear_4
+        # self.planetary_reducer
+
+        # sun planetary gear
+        # self.sun_planetary_gear_4.data.root_state_w.clone()
+
+        # Object state
+        # planetary_carrier state
+        planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()          # [x, y, z]
+        planetary_carrier_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()        # [q_w, q_x, q_y, q_z]
+        # print(f"Planetary Carrier Position: {planetary_carrier_pos}")
+        # print(f"Planetary Carrier Quaternion: {planetary_carrier_quat}")
+
+        pin_locals = torch.stack(self.pin_local_positions)
+        q_w = planetary_carrier_quat[:, 0].view(-1, 1, 1)
+        q_vec = planetary_carrier_quat[:, 1:].unsqueeze(1)
+
+        v = pin_locals.unsqueeze(0)
+
+        t = 2.0 * torch.cross(q_vec, v, dim=-1)
+        rotated_pins = v + q_w * t + torch.cross(q_vec, t, dim=-1)  
+
+        final_pin_positions = planetary_carrier_pos.unsqueeze(1) + rotated_pins
+
+        print(f"final_pin_positions: {final_pin_positions}")
+        print(f"sun_planetary_gear_1: {self.sun_planetary_gear_1.data.root_state_w.clone()}")
+
+
+class Galaxear1GearboxAssemblyAgent:
+    def __init__(self):
+        pass
