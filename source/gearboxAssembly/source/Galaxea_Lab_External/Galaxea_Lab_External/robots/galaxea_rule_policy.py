@@ -832,31 +832,59 @@ class GalaxeaRulePolicy:
         # self.sun_planetary_gear_4
         # self.planetary_reducer
 
-        # sun planetary gear
-        # self.sun_planetary_gear_4.data.root_state_w.clone()
-
         # Object state
-        # planetary_carrier state
+        # planetary_carrier state: position and quaternion
         planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()          # [x, y, z]
         planetary_carrier_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()        # [q_w, q_x, q_y, q_z]
-        # print(f"Planetary Carrier Position: {planetary_carrier_pos}")
-        # print(f"Planetary Carrier Quaternion: {planetary_carrier_quat}")
-
         pin_locals = torch.stack(self.pin_local_positions)
         q_w = planetary_carrier_quat[:, 0].view(-1, 1, 1)
         q_vec = planetary_carrier_quat[:, 1:].unsqueeze(1)
-
         v = pin_locals.unsqueeze(0)
-
         t = 2.0 * torch.cross(q_vec, v, dim=-1)
         rotated_pins = v + q_w * t + torch.cross(q_vec, t, dim=-1)  
-
         final_pin_positions = planetary_carrier_pos.unsqueeze(1) + rotated_pins
 
+        # sun_planetary_gear state: position
+        sun_planetary_gear_1_pos = self.sun_planetary_gear_1.data.root_state_w[:, :3].clone()
+        sun_planetary_gear_2_pos = self.sun_planetary_gear_2.data.root_state_w[:, :3].clone()
+        sun_planetary_gear_3_pos = self.sun_planetary_gear_3.data.root_state_w[:, :3].clone()
+        sun_planetary_gear_4_pos = self.sun_planetary_gear_4.data.root_state_w[:, :3].clone()
+
         print(f"final_pin_positions: {final_pin_positions}")
-        print(f"sun_planetary_gear_1: {self.sun_planetary_gear_1.data.root_state_w.clone()}")
+        print(f"sun_planetary_gear_1: {sun_planetary_gear_1_pos}")
+        print(f"sun_planetary_gear_2: {sun_planetary_gear_2_pos}")
+        print(f"sun_planetary_gear_3: {sun_planetary_gear_3_pos}")
+        print(f"sun_planetary_gear_4: {sun_planetary_gear_4_pos}")
 
 
 class Galaxear1GearboxAssemblyAgent:
     def __init__(self):
+        # inner state in finite state machine (mearl machine)
+        self.fsm_state = "FSM_INITIALIZATION"
+
+    def finite_state_machine(self,
+            input
+        ) -> tuple[float, float]:
         pass
+        # -------------------------------------------------------------------------------------------------------------------------------------------------------- #
+        # [Start State] INITIALIZATION --------------------------------------------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------------------------------------- #
+        if self.fsm_state == "FSM_INITIALIZATION":
+            # [State Transition] INITIALIZATION -> PHASE1
+            if 0:
+                pass
+            # [State Transition] INITIALIZATION -> INITIALIZATION
+            else:
+                self.fsm_state = "FSM_PHASE1"
+
+        # -------------------------------------------------------------------------------------------------------------------------------------------------------- #
+        # [INTERMEDIATE State] PHASE1 ---------------------------------------------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------------------------------------- #
+        elif self.fsm_state == "FSM_PHASE1":
+            pass
+
+        # -------------------------------------------------------------------------------------------------------------------------------------------------------- #
+        # [End State] FINALIZATION ------------------------------------------------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------------------------------------- #
+        elif self.fsm_state == "FSM_FINALIZATION":
+            pass
