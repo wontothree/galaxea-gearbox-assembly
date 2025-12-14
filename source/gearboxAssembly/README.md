@@ -1,3 +1,49 @@
+    gearboxAssembly
+    ├── scripts                                
+    │   ├── basic         
+    │	│   ├── assembly_scene_teleop_demo.py  # (*)
+    │	│   └── create_scene_rule_based.py     # (*)
+    │	│   
+    │   ├── rl_games
+    │	│   ├── play.py                        # (*)
+    │	│   └── train.py                       # (*)
+    │	│   
+    │   ├── list_envs.py                       # file to print envs
+    │   ├── random_agent.py                    # file to test
+    │   ├── rule_based_agent.py                # file to test
+    │   └── zero_agent.py                      # file to test 
+    │
+    └── source/Galaxea_Lab_External            # env
+        ├── Galaxea_Lab_External
+        │   ├── robots
+        │	│   ├── galaxea_assets.py
+        │	│   ├── galaxea_robots.py 		
+        │	│   ├── galaxea_rule_policy.py 			
+        │	│   └── gears_assets.py 		
+        │	│
+        │   └── tasks
+        │		    └── direct
+        │				└── galaxea_lab_external
+        │				    ├── agents
+        │					│   └── rl_games_ppo_cfg.yaml
+        │                   │
+        │				    ├── galaxea_lab_external_env.py      # (*)
+        │				    └── galaxea_lab_external_env_cfg.py  # (*)
+        │   
+        ├── assets
+        │   ├── play.py
+        │   └── train.py
+        │   
+        ├── config
+        │   ├── play.py
+        │   └── train.py
+        │
+        ├── docs
+        │   └── CHANGELOG.rst
+        │
+        ├── pyproject.toml
+        └── setup.py       
+
 # Action (16-DOF)
 
 $$
