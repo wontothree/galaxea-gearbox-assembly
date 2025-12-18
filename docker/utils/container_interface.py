@@ -121,22 +121,22 @@ class ContainerInterface:
             container_history_file.touch(mode=0o2644, exist_ok=True)
 
         # build the image for the base profile if not running base (up will build base already if profile is base)
-        if self.profile != "base":
-            subprocess.run(
-                [
-                    "docker",
-                    "compose",
-                    "--file",
-                    "docker-compose.yaml",
-                    "--env-file",
-                    ".env.base",
-                    "build",
-                    "isaac-lab-base",
-                ],
-                check=False,
-                cwd=self.context_dir,
-                env=self.environ,
-            )
+        # if self.profile != "base":
+        #     subprocess.run(
+        #         [
+        #             "docker",
+        #             "compose",
+        #             "--file",
+        #             "docker-compose.yaml",
+        #             "--env-file",
+        #             ".env.base",
+        #             "build",
+        #             "isaac-lab-base",
+        #         ],
+        #         check=False,
+        #         cwd=self.context_dir,
+        #         env=self.environ,
+        #     )
 
         # build the image for the profile
         subprocess.run(

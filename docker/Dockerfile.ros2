@@ -39,6 +39,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Add sourcing of setup.bash to .bashrc
     echo "source /opt/ros/jazzy/setup.bash" >> ${HOME}/.bashrc
 
+### Isaac ROS setup (for FoundationPose)
+
+# [cite_start]1. Create the workspace directory to ensure mount point exists [cite: 13]
+ARG DOCKER_ISAAC_ROS_WS
+RUN mkdir -p ${DOCKER_ISAAC_ROS_WS}/src
+
+# 0. Add NVIDIA CUDA & TensorRT Repositories for Noble (Required for FoundationPose)
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    rm cuda-keyring_1.1-1_all.deb
+
+# 1. Add NVIDIA Isaac ROS Release 4.0 Repository (Converted to Docker format)
+RUN k="/usr/share/keyrings/nvidia-isaac-ros.gpg" && \
+    curl -fsSL https://isaac.download.nvidia.com/isaac-ros/repos.key | gpg --dearmor \
+    | tee -a $k > /dev/null && \
+    f="/etc/apt/sources.list.d/nvidia-isaac-ros.list" && \
+    touch $f && \
+    s="deb [signed-by=$k] https://isaac.download.nvidia.com/isaac-ros/release-4.0 noble main" && \
+    (grep -qxF "$s" $f || echo "$s" | tee -a $f)
+
+# 2. Install FoundationPose and dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-isaac-ros-foundationpose \
+    ros-jazzy-isaac-ros-dnn-image-encoder \
+    ros-jazzy-isaac-ros-tensor-rt \
+    git-lfs && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 3. Create a workspace directory for models (optional but recommended)
+RUN mkdir -p ${DOCKER_USER_HOME}/isaac_ros_assets
+
 # Copy the RMW specifications for ROS2
 # https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_ros.html
 COPY docker/.ros/ ${DOCKER_USER_HOME}/.ros/
