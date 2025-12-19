@@ -81,7 +81,6 @@ class GalaxeaRulePolicy:
         self.current_target_position = None
         self.current_target_orientation = None
 
-
         self.sim_dt = sim.get_physics_dt()
         print(f"sim_dt: {self.sim_dt}")
         self.count = 0
@@ -194,9 +193,21 @@ class GalaxeaRulePolicy:
 
         self.initial_root_state = None
 
+
+
+        # add
+        self.agent = Galaxear1GearboxAssemblyAgent(
+            sim=sim,
+            scene=scene,
+            obj_dict=obj_dict
+        )
+        self.context = Context(sim, self.agent)
+        initial_state = InitializationState()
+        fsm = StateMachine(initial_state, self.context)
+        self.context.fsm = fsm
+
     def set_initial_root_state(self, initial_root_state: dict):
         self.initial_root_state = initial_root_state.copy()
-
 
     def get_config(self, arm_name: str):
         # arm_name: left or right
@@ -231,7 +242,8 @@ class GalaxeaRulePolicy:
                             arm_entity_cfg: SceneEntityCfg,
                             gripper_entity_cfg: SceneEntityCfg,
                             diff_ik_controller: DifferentialIKController,
-                            target_position: torch.Tensor, target_orientation: torch.Tensor,
+                            target_position: torch.Tensor, 
+                            target_orientation: torch.Tensor,
                             target_marker: VisualizationMarkers):
         robot = self.scene["robot"]
 
@@ -589,7 +601,7 @@ class GalaxeaRulePolicy:
         
         # target_marker.visualize(target_position, target_orientation)
 
-        print(f"self.current_target_position: {self.current_target_position}")
+        # print(f"self.current_target_position: {self.current_target_position}")
 
         target_position = self.current_target_position.clone()
 
@@ -706,7 +718,6 @@ class GalaxeaRulePolicy:
                 
             action, joint_ids = self.mount_gear_to_planetary_carrier(gear_id, self.count_step_2, current_arm, current_gripper)
 
-
         # Pick up the 2nd gear
         if self.count >= self.count_step_3[0] and self.count < self.count_step_3[-1]:
             gear_id = 2
@@ -814,7 +825,9 @@ class GalaxeaRulePolicy:
                 current_gripper = self.left_gripper_entity_cfg
             action, joint_ids = self.mount_gear_to_planetary_carrier(gear_id, self.count_step_13, current_arm, current_gripper)
 
-        self.print_inner_state()
+        # self.print_inner_state()
+        self.context.fsm.update()
+        action, joint_ids = self.agent.joint_position_command, self.agent.joint_command_ids
 
         return action, joint_ids
 
@@ -849,17 +862,424 @@ class GalaxeaRulePolicy:
         sun_planetary_gear_2_pos = self.sun_planetary_gear_2.data.root_state_w[:, :3].clone()
         sun_planetary_gear_3_pos = self.sun_planetary_gear_3.data.root_state_w[:, :3].clone()
         sun_planetary_gear_4_pos = self.sun_planetary_gear_4.data.root_state_w[:, :3].clone()
+        # print(f"final_pin_positions: {final_pin_positions}")
+        # print(f"sun_planetary_gear_1: {sun_planetary_gear_1_pos}")
+        # print(f"sun_planetary_gear_2: {sun_planetary_gear_2_pos}")
+        # print(f"sun_planetary_gear_3: {sun_planetary_gear_3_pos}")
+        # print(f"sun_planetary_gear_4: {sun_planetary_gear_4_pos}")
+        self.context.fsm.update()
 
-        print(f"final_pin_positions: {final_pin_positions}")
-        print(f"sun_planetary_gear_1: {sun_planetary_gear_1_pos}")
-        print(f"sun_planetary_gear_2: {sun_planetary_gear_2_pos}")
-        print(f"sun_planetary_gear_3: {sun_planetary_gear_3_pos}")
-        print(f"sun_planetary_gear_4: {sun_planetary_gear_4_pos}")
+
+        # print(f"left_diff_ik_controller: {self.robot_agent.left_diff_ik_controller}")
+        # print(f"left_arm_entity_cf.body_ids: {self.robot_agent.left_arm_entity_cfg.body_ids[0] -1}")
+        # print(f"left_gripper_entity_cfg: {self.robot_agent.left_gripper_entity_cfg}")
+        # print(self.scene["robot"].is_fixed_base)
 
 
+
+
+from isaaclab.controllers import (
+    DifferentialIKController,
+    DifferentialIKControllerCfg,
+)
+from isaaclab.managers import SceneEntityCfg
 class Galaxear1GearboxAssemblyAgent:
-    pass
+    def __init__(self,
+            sim: sim_utils.SimulationContext,
+            scene: InteractiveScene,
+            obj_dict: dict
+        ):
+        self.sim = sim
+        self.device = sim.device
+        self.scene = scene
+        self.robot = scene["robot"]
 
+        # Object state
+        self.obj_dict = obj_dict
+        self.planetary_carrier = obj_dict["planetary_carrier"]
+        self.ring_gear = obj_dict["ring_gear"]
+        self.sun_planetary_gear_1 = obj_dict["sun_planetary_gear_1"]
+        self.sun_planetary_gear_2 = obj_dict["sun_planetary_gear_2"]
+        self.sun_planetary_gear_3 = obj_dict["sun_planetary_gear_3"]
+        self.sun_planetary_gear_4 = obj_dict["sun_planetary_gear_4"]
+        self.planetary_reducer = obj_dict["planetary_reducer"]
+
+        # Define pin positions in local coordinates relative to planetary carrier
+        self.pin_local_positions = [
+            torch.tensor([0.0, -0.054, 0.0], device=self.device),      # pin_0
+            torch.tensor([0.0465, 0.0268, 0.0], device=self.device),   # pin_1
+            torch.tensor([-0.0465, 0.0268, 0.0], device=self.device),  # pin_2
+        ]
+
+        # Constants for pick and place
+        self.TCP_offset_z = 1.1475 - 1.05661
+        self.TCP_offset_x = 0.3864 - 0.3785
+        self.table_height = 0.9
+        self.grasping_height = -0.003
+
+        # Initial target pose and orientation
+        self.target_position_left = torch.tensor([0.3864, 0.5237, 1.1475], device=self.device)
+        self.target_orientation_left = torch.tensor([0.0, -1.0, 0.0, 0.0], device=self.device)
+        self.target_position_right = torch.tensor([0.3864, -0.5237, 1.1475], device=self.device)
+        self.target_orientation_right = torch.tensor([0.0, -1.0, 0.0, 0.0], device=self.device)
+
+        # Initialize arm controller
+        self.left_diff_ik_controller, self.left_arm_entity_cfg, self.left_gripper_entity_cfg = self.initialize_arm_controller("left")
+        self.right_diff_ik_controller, self.right_arm_entity_cfg, self.right_gripper_entity_cfg = self.initialize_arm_controller("right")
+        # self.left_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
+        # self.right_gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
+
+        # Action
+        self.joint_position_command = None
+        self.joint_command_ids = None
+
+
+        # pick up
+        self.pick_and_place_fsm_state = "PICK_READY"
+        self.pick_and_place_fsm_timer = 0
+
+        # State
+        self.current_ee_position_world = None
+        self.current_left_gripper_state = None
+        self.sun_planetary_gear_1_state = None
+    
+    def observe(self):
+        """
+        update robot state and object state - simulation ground truth
+        """
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # Robot staten ------------------------------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # end effector
+        left_arm_body_ids = self.left_arm_entity_cfg.body_ids
+        self.current_ee_position_world = self.robot.data.body_state_w[                    # simulation ground truth
+            :,
+            left_arm_body_ids[0],
+            0:3
+        ]
+
+
+        # gripper
+        left_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
+        self.current_left_gripper_state = self.robot.data.joint_pos[:, left_gripper_joint_ids]   # 2-DOF
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # Object state ------------------------------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        self.sun_planetary_gear_1_state = self.sun_planetary_gear_1.data.root_state_w.clone()    # 13-DOF
+
+        # sun_planetary_gear_1_pos = self.sun_planetary_gear_1.data.root_state_w[:, :3].clone()
+        # sun_planetary_gear_2_pos = self.sun_planetary_gear_2.data.root_state_w[:, :3].clone()
+        # sun_planetary_gear_3_pos = self.sun_planetary_gear_3.data.root_state_w[:, :3].clone()
+        # sun_planetary_gear_4_pos = self.sun_planetary_gear_4.data.root_state_w[:, :3].clone()
+
+        # Planetary carrier pins
+        planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()          # [x, y, z]
+        planetary_carrier_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()        # [q_w, q_x, q_y, q_z]
+        pin_locals = torch.stack(self.pin_local_positions)
+        q_w = planetary_carrier_quat[:, 0].view(-1, 1, 1)
+        q_vec = planetary_carrier_quat[:, 1:].unsqueeze(1)
+        v = pin_locals.unsqueeze(0)
+        t = 2.0 * torch.cross(q_vec, v, dim=-1)
+        rotated_pins = v + q_w * t + torch.cross(q_vec, t, dim=-1)  
+        self.planetary_carrier_pin_positions = planetary_carrier_pos.unsqueeze(1) + rotated_pins
+
+    def initialize_arm_controller(self, arm_name: str):
+        """
+        arm_name: left or right
+        """
+        # Create differential inverse kinematics controller calculating joint angle for target end effect pose
+        differential_inverse_kinematics_cfg = DifferentialIKControllerCfg(
+            command_type="pose",                      # position and orientation
+            use_relative_mode=False,                  # global coordinate (True: relative coordinate)
+            ik_method="dls"                           # damped least squares: inverse kinematics standard solver in assembly task 
+        )
+        differential_inverse_kinematics_controller = DifferentialIKController(
+            differential_inverse_kinematics_cfg,
+            num_envs=self.scene.num_envs,             # number of parallel environment in Isaac Sim, vectorizated simulation
+            device=self.device                        # "cuda": gpu / "cpu": cpu
+        )
+
+        # Robot parameter
+        arm_entity_cfg = SceneEntityCfg(
+            "robot",                                  # robot entity name
+            joint_names=[f"{arm_name}_arm_joint.*"],  # joint entity set
+            body_names=[f"{arm_name}_arm_link6"]      # body entity set
+        )
+        gripper_entity_cfg = SceneEntityCfg(
+            "robot",
+            joint_names=[f"{arm_name}_gripper_axis.*"]
+        )
+        # Resolving the scene entities
+        arm_entity_cfg.resolve(self.scene)
+        gripper_entity_cfg.resolve(self.scene)
+
+        return differential_inverse_kinematics_controller, arm_entity_cfg, gripper_entity_cfg
+
+    # End effector control by differential inverse kinematics (need to remove simulation ground truth dependency)
+    def solve_inverse_kinematics(self,
+            arm_name: str,
+            target_ee_position_base: torch.Tensor,
+            target_ee_orientation_base: torch.Tensor
+        ):
+        """
+        target_ee_pose, current_joint_pose -> inverse kinematics -> desired_joint_pose
+        """
+        # Arm selection and configuration
+        if arm_name == "left":
+            arm_joint_ids = self.left_arm_entity_cfg.joint_ids
+            arm_body_ids = self.left_arm_entity_cfg.body_ids
+            diff_ik_controller = self.left_diff_ik_controller
+        elif arm_name == "right":
+            arm_joint_ids = self.right_arm_entity_cfg.joint_ids
+            arm_body_ids = self.right_arm_entity_cfg.body_ids
+            diff_ik_controller = self.right_diff_ik_controller
+
+        if self.robot.is_fixed_base:                                             # True
+            ee_jacobi_idx = arm_body_ids[0] - 1                                  # index of end effector jacobian
+        else:
+            ee_jacobi_idx = arm_body_ids[0]
+
+        # Get the target position and orientation of the arm
+        ik_commands = torch.cat(
+            [target_ee_position_base, target_ee_orientation_base], 
+            dim=-1
+        )
+        diff_ik_controller.set_command(ik_commands)
+
+        # Inverse kinematics solver
+        current_ee_pose_world = self.robot.data.body_state_w[                    # simulation ground truth
+            :,
+            arm_body_ids[0],
+            0:7
+        ]
+        current_base_pose_world = self.robot.data.root_state_w[:, 0:7]           # constant if is_fixed_base
+        current_ee_position_base, current_ee_quaternion_base = subtract_frame_transforms(
+            current_base_pose_world[:, 0:3],
+            current_base_pose_world[:, 3:7],
+            current_ee_pose_world[:, 0:3],
+            current_ee_pose_world[:, 3:7],
+        )
+
+        jacobian = self.robot.root_physx_view.get_jacobians()[
+            :, 
+            ee_jacobi_idx, 
+            :,
+            arm_joint_ids
+        ]
+        current_arm_joint_pose = self.robot.data.joint_pos[                          # state space to be able to measured        
+            :,
+            arm_joint_ids
+        ]
+        # compute the joint commands
+        desired_arm_joint_position = diff_ik_controller.compute(
+            current_ee_position_base, 
+            current_ee_quaternion_base,
+            jacobian, 
+            current_arm_joint_pose
+        )
+
+        return desired_arm_joint_position, arm_joint_ids
+
+    def pick_and_place(self,
+            arm_name: str,   # left or right
+            object_name: str # planetary_gear, sun_gear, planetary_carrier, ring_gear, planetary_reducer
+        ) -> None:
+        FSM_INITIALIZATION_STATE  = "INITIALIZATION"
+        FSM_PICK_READY_STATE      = "PICK_READY"
+        FSM_PICK_APPROACH_STATE   = "PICK_APPROACH"
+        FSM_PICK_EXECUTION_STATE  = "PICK_EXECUTION"
+        FSM_PICK_COMPLETE_STATE   = "PICK_COMPLETE"
+        FSM_PLACE_READY_STATE     = "PLACE_READY"
+        FSM_PLACE_APPROACH_STATE  = "PLACE_APPROACH"
+        FSM_PLACE_EXECUTION_STATE = "PLACE_EXECUTION"
+        FSM_PLACE_COMPLETE_STATE  = "PLACE_COMPLETE"
+        FSM_FINALIZATION_STATE    = "FINALIZATION"
+
+        # Gripper selection and configuration
+        if arm_name == "left":
+            gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
+        elif arm_name == "right":
+            gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
+
+        # Observe robot state and object state
+        self.observe()
+
+        if object_name == "planetary_carrier":
+            pass
+        elif object_name == "ring_gear":
+            pass
+        elif object_name == "planetary_reducer":
+            pass
+        elif object_name == "planetary_gear" or object_name == "sun_gear":
+            object_height_offset = 0.0
+            object_state = self.sun_planetary_gear_1_state
+
+        target_position = object_state[:, :3].clone()
+        target_position[:, 2] = self.table_height + self.grasping_height + object_height_offset
+        target_position = target_position + torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
+
+        target_orientation = object_state[:, 3:7].clone()
+        # Rotate the target orientation 180 degrees around the y-axis
+        target_orientation, target_position = torch_utils.tf_combine(
+            target_orientation, 
+            target_position,
+            torch.tensor([[0.0, 1.0, 0.0, 0.0]], device=self.device), 
+            torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
+        )
+
+        # approeach position (above 10cm)
+        target_position_h = target_position + torch.tensor([0.0, 0.0, 0.1], device=self.device)
+
+        # place
+        target_position2 = self.planetary_carrier_pin_positions[:, 1, :].clone()
+        target_position2[:, 2] = self.table_height + self.grasping_height
+        target_position2[:, 2] += object_height_offset
+        target_position2 += torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
+        
+        target_position2_h = target_position2 + torch.tensor([0.0, 0.0, 0.1], device=self.device)
+        target_position2_h_down = target_position2 + torch.tensor([0.0, 0.0, 0.02], device=self.device)
+        target_orientation2 = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
+
+
+        print(f"[PICK & PLACE FSM] {self.pick_and_place_fsm_state}")
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Start State] PICK_READY --------------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        if self.pick_and_place_fsm_state == FSM_INITIALIZATION_STATE:
+            # [State Transition] INITIALIZATION -> PICK_READY
+            self.pick_and_place_fsm_state = FSM_PICK_READY_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] PICK_READY -------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PICK_READY_STATE:
+            desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_position_base=target_position_h, 
+                target_ee_orientation_base=target_orientation
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = joint_ids
+
+            # [State Transition] PICK_READY -> PICK_APPROACH
+            if self.position_reached(self.current_ee_position_world, target_position_h):
+                self.pick_and_place_fsm_state = FSM_PICK_APPROACH_STATE
+            
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] PICK_APPROACH ----------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PICK_APPROACH_STATE:
+            desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_position_base=target_position, 
+                target_ee_orientation_base=target_orientation
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = joint_ids
+
+            # [State Transition] PICK_APPROACH -> PICK_EXECUTION
+            if self.position_reached(self.current_ee_position_world, target_position):
+                self.pick_and_place_fsm_state = FSM_PICK_EXECUTION_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] PICK_EXECUTION ---------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PICK_EXECUTION_STATE:
+            desired_joint_position = torch.tensor([[0.0, 0.0]], device=self.device)
+            joint_ids = gripper_joint_ids
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = joint_ids
+
+            # [State Transition] PICK_EXECUTION -> FSM_PICK_COMPLETE_STATE
+            self.pick_and_place_fsm_timer += 1
+            if self.pick_and_place_fsm_timer > 50:
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PICK_COMPLETE_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PICK_COMPLETE_STATE ------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PICK_COMPLETE_STATE:
+            self.pick_and_place_fsm_state = FSM_PLACE_READY_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_READY_STATE --------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PLACE_READY_STATE:
+            desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_position_base=target_position2_h, 
+                target_ee_orientation_base=target_orientation2
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = joint_ids
+
+            # [State Transition] FSM_PLACE_READY_STATE -> FSM_PLACE_APPROACH_STATE
+            if self.position_reached(self.current_ee_position_world, target_position2_h):
+                self.pick_and_place_fsm_state = FSM_PLACE_APPROACH_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_APPROACH_STATE ------------------------------------------------------------------------ #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PLACE_APPROACH_STATE:
+            desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_position_base=target_position2_h_down, 
+                target_ee_orientation_base=target_orientation2
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = joint_ids
+
+            # [State Transition] FSM_PLACE_APPROACH_STATE -> FSM_PLACE_EXECUTION_STATE
+            self.pick_and_place_fsm_timer += 1
+            if self.position_reached(self.current_ee_position_world, target_position2_h_down) and self.pick_and_place_fsm_timer > 30: # 30
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PLACE_EXECUTION_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_EXECUTION_STATE ----------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PLACE_EXECUTION_STATE:
+            joint_ids = gripper_joint_ids
+            num_gripper_joints = len(joint_ids)
+            desired_joint_position = torch.full(
+                (num_gripper_joints,), 0.4, device=self.device
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = joint_ids
+
+            # [State Transition] FSM_PLACE_EXECUTION_STATE -> FSM_PLACE_COMPLETE_STATE
+            self.pick_and_place_fsm_timer += 1
+            if self.pick_and_place_fsm_timer > 100:
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PLACE_COMPLETE_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_COMPLETE_STATE ------------------------------------------------------------------------ #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PLACE_COMPLETE_STATE:
+            desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_position_base=target_position2_h, 
+                target_ee_orientation_base=target_orientation2
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = joint_ids
+
+            # [State Transition] FSM_PLACE_COMPLETE_STATE -> FSM_FINALIZATION_STATE
+            if self.position_reached(self.current_ee_position_world, target_position2_h):
+                self.pick_and_place_fsm_state = FSM_FINALIZATION_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM End State] FSM_FINALIZATION_STATE ----------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_FINALIZATION_STATE:
+            pass
+
+    # Utility functions
+    def position_reached(self, current_pos, target_pos, tol=0.02):
+        return torch.norm(current_pos - target_pos, dim=1).item() < tol
 
 from abc import ABC, abstractmethod
 
@@ -891,48 +1311,105 @@ class StateMachine:
         self.state.update(self.context)
 
 class Context:
-    pass
+    NUM_PLANETARY_GEARS = 3
+    def __init__(self, sim, agent):
+        self.sim = sim
+        self.agent = agent
+        self.fsm = None            # object of StateMachine
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Start State] INITIALIZATION ------------------------------------------------------------------------------------------------------------- #
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
+        # Progress
+        self.planetary_gear_inserted_count = 0
+        self.sun_gear_inserted = False
+        self.ring_gear_inserted = False
+        self.planetary_reducer_inserted = False
+    
+    @property
+    def is_all_planetary_gear_inserted(self):
+        return self.planetary_gear_inserted_count >= self.NUM_PLANETARY_GEARS
+    
+    @property
+    def is_sun_gear_inserted(self):
+        return self.sun_gear_inserted
+    
+    @property
+    def is_ring_gear_inserted(self):
+        return self.ring_gear_inserted
+    
+    @property
+    def is_planetary_reducer_inserted(self):
+        return self.planetary_reducer_inserted
+    
+    def on_planetary_gear_inserted(self):
+        if self.planetary_gear_inserted_count < self.NUM_PLANETARY_GEARS:
+            self.planetary_gear_inserted_count += 1
+
+    def on_sun_gear_inserted(self):
+        self.sun_gear_inserted = True
+    
+    def on_ring_gear_inserted(self):
+        self.ring_gear_inserted = True
+
+    def on_planetary_reducer_inserted(self):
+        self.planetary_reducer_inserted = True
+
+    def reset(self):
+        self.planetary_gear_inserted_count = 0
+        self.sun_gear_inserted = False
+        self.ring_gear_inserted = False
+        self.planetary_reducer_inserted = False
+
+# -------------------------------------------------------------------------------------------------------------------------- #
+# [FSM Start State] Initialization ----------------------------------------------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------------------------------- #
 class InitializationState(State):
     def enter(self, context):
-        print("[FSM Start State] INITIALIZATION: enter")
+        print("[FSM Start State] Initialization: enter")
+        context.reset()
 
     def update(self, context):
-        pass
+        if context.fsm is not None:
+            context.fsm.transition_to(PlanetaryGearInsertionState())
 
     def exit(self, context):
-        print("[FSM Start State] INITIALIZATION: exit")
+        print("[FSM Start State] Initialization: exit")
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Intermediate State] PHASE 1 ------------------------------------------------------------------------------------------------------------- #
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-class Phase1State(State):
+# -------------------------------------------------------------------------------------------------------------------------- #
+# [FSM Intermediate State] Planetary Gear Insertion ------------------------------------------------------------------------ #
+# -------------------------------------------------------------------------------------------------------------------------- #
+class PlanetaryGearInsertionState(State):
+    def enter(self, context):
+        print("[FSM Intermediate State] Planetary Gear Insertion: enter")
+
+    def update(self, context):
+        context.agent.pick_and_place(
+            arm_name="left",
+            object_name="planetary_gear"
+        )
+
+    def exit(self, context):
+        print("[FSM Intermediate State] Planetary Gear Insertion: exit")
+
+# -------------------------------------------------------------------------------------------------------------------------- #
+# [FSM Intermediate State] Sun Gear Insertion ------------------------------------------------------------------------------ #
+# -------------------------------------------------------------------------------------------------------------------------- #
+class SunGearInsertionState(State):
     pass
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Intermediate State] PHASE 2 ------------------------------------------------------------------------------------------------------------- #
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-class Phase2State(State):
+# -------------------------------------------------------------------------------------------------------------------------- #
+# [FSM Intermediate State] Ring Gear Insertion ----------------------------------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------------------------------- #
+class RingGearInsertionState(State):
     pass
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Intermediate State] PHASE 3 ------------------------------------------------------------------------------------------------------------- #
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-class Phase3State(State):
+# -------------------------------------------------------------------------------------------------------------------------- #
+# [FSM Intermediate State] Planetary Reducer Insertion --------------------------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------------------------------- #
+class PlanetaryReducerInsertionState(State):
     pass
 
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Intermediate State] PHASE 4 ------------------------------------------------------------------------------------------------------------- #
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-class Phase4State(State):
-    pass
-
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
-# [FSM End State] FINALIZATION ----------------------------------------------------------------------------------------------------------------- #
-# ---------------------------------------------------------------------------------------------------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------------------------------- #
+# [FSM End State] Finalization --------------------------------------------------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------------------------------- #
 class FinalizationState(State):
     def enter(self, context):
         print("[FSM Start State] FINALIZATION: enter")
