@@ -173,7 +173,6 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         observations = {"policy": obs}
         return observations
 
-
     def get_key_points(self):
         # Pin positions
         # Calculate world positions of all pins
@@ -204,8 +203,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
             gear_world_positions.append(gear_pos)
             gear_world_quats.append(gear_quat)
         
-        carrier_world_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()
-        carrier_world_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()
+        # carrier_world_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()
+        # carrier_world_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()
 
         ring_gear_world_pos = self.ring_gear.data.root_state_w[:, :3].clone()
         ring_gear_world_quat = self.ring_gear.data.root_state_w[:, 3:7].clone()
