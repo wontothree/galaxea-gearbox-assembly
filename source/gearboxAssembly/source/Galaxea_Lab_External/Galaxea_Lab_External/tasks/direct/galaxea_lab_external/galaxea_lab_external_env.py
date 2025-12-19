@@ -150,9 +150,9 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         rgb = self.head_camera.data.output[data_type]
         left_hand_rgb = self.left_hand_camera.data.output[data_type]
         right_hand_rgb = self.right_hand_camera.data.output[data_type]
-        print(f"rgb: {rgb.shape}")
-        print(f"left_hand_rgb: {left_hand_rgb.shape}")
-        print(f"right_hand_rgb: {right_hand_rgb.shape}")
+        # print(f"rgb: {rgb.shape}")
+        # print(f"left_hand_rgb: {left_hand_rgb.shape}")
+        # print(f"right_hand_rgb: {right_hand_rgb.shape}")
 
         # obs = torch.cat(
         #     (
