@@ -83,7 +83,12 @@ $$
 |Class||Function|
 |---|---|---|
 |`Galaxear1GearboxAssemblyAgent`||initialize_arm_controller|
+|||observe_robot_state|
+|||observe_object_state|
+|||observe_assembly_progress|
+|||initialize_arm_controller|
 |||solve_inverse_kinematics|
+|||pick_and_place|
 |`State`|abstract class for states|
 |`StateMachine`|managing states|
 |`Context`||
