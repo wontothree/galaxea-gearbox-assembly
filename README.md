@@ -58,4 +58,4 @@ python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v
 
 This project is tested in the environment of Docker and Window 11.
 
---- 
+---

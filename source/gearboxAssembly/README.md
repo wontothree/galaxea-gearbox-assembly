@@ -77,3 +77,41 @@ $$
 |Wrist|11|12|
 |Wrist|13|14|
 |Gripper|15, 16|17, 18|
+
+# Classes
+
+|Class||Function|
+|---|---|---|
+|`Galaxear1GearboxAssemblyAgent`||initialize_arm_controller|
+|||solve_inverse_kinematics|
+|`State`|abstract class for states|
+|`StateMachine`|managing states|
+|`Context`||
+|`InitializationState`||
+|`PlanetaryGearInsertionState`||
+|`SunGearInsertionState`||
+|`RingGearInsertionState`||
+|`PlanetaryReducerInsertionState`||
+|`FinalizationState`||
+
+FSM → Context → Robot
+
+StateMachine / State에서는 solve_inverse_kinematics를 직접 호출하지 않고, context.robot.solve_inverse_kinematics(...) 형태로 호출한다.
+
+```
+context.robot.solve_inverse_kinematics(...)
+```
+
+FSM은 행동을 지시하기만 하고 Context는 의존성 주입만 한다.
+
+```py
+robot_agent = Galaxear1GearboxAssemblyAgent(
+    sim=sim,
+    scene=scene,
+    obj_dict=obj_dict
+)
+self.context = Context(sim, robot_agent)
+initial_state = InitializationState()
+fsm = StateMachine(initial_state, self.context)
+self.context.fsm = fsm
+```
