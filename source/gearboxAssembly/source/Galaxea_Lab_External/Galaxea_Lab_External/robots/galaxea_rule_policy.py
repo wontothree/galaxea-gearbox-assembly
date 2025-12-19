@@ -933,8 +933,7 @@ class Galaxear1GearboxAssemblyAgent:
         self.joint_position_command = None
         self.joint_command_ids = None
 
-
-        # pick up
+        # pick and place
         self.pick_and_place_fsm_state = "PICK_READY"
         self.pick_and_place_fsm_timer = 0
 
@@ -943,13 +942,10 @@ class Galaxear1GearboxAssemblyAgent:
         self.current_left_gripper_state = None
         self.sun_planetary_gear_1_state = None
     
-    def observe(self):
+    def observe_robot_state(self):
         """
-        update robot state and object state - simulation ground truth
+        update robot state: simulation ground truth
         """
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # Robot staten ------------------------------------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
         # end effector
         left_arm_body_ids = self.left_arm_entity_cfg.body_ids
         self.current_ee_position_world = self.robot.data.body_state_w[                    # simulation ground truth
@@ -958,20 +954,56 @@ class Galaxear1GearboxAssemblyAgent:
             0:3
         ]
 
-
         # gripper
         left_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
         self.current_left_gripper_state = self.robot.data.joint_pos[:, left_gripper_joint_ids]   # 2-DOF
 
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # Object state ------------------------------------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        self.sun_planetary_gear_1_state = self.sun_planetary_gear_1.data.root_state_w.clone()    # 13-DOF
+    def observe_object_state(self):
+        """
+        update object state: simulation ground truth
+        """
+        # Sun planetary gears
+        self.sun_planetary_gear_positions = []
+        self.sun_planetary_gear_quats = []
+        sun_planetary_gear_names = ['sun_planetary_gear_1', 'sun_planetary_gear_2', 'sun_planetary_gear_3', 'sun_planetary_gear_4']
+        for sun_planetary_gear_name in sun_planetary_gear_names:
+            gear_obj = self.obj_dict[sun_planetary_gear_name]
+            gear_pos = gear_obj.data.root_state_w[:, :3].clone()
+            gear_quat = gear_obj.data.root_state_w[:, 3:7].clone()
 
-        # sun_planetary_gear_1_pos = self.sun_planetary_gear_1.data.root_state_w[:, :3].clone()
-        # sun_planetary_gear_2_pos = self.sun_planetary_gear_2.data.root_state_w[:, :3].clone()
-        # sun_planetary_gear_3_pos = self.sun_planetary_gear_3.data.root_state_w[:, :3].clone()
-        # sun_planetary_gear_4_pos = self.sun_planetary_gear_4.data.root_state_w[:, :3].clone()
+            self.sun_planetary_gear_positions.append(gear_pos)
+            self.sun_planetary_gear_quats.append(gear_quat)
+
+        # Planetary carrier
+        self.planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()
+        self.planetary_carrier_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()
+
+        # Ring gear
+        self.ring_gear_pos = self.ring_gear.data.root_state_w[:, :3].clone()
+        self.ring_gear_quat = self.ring_gear.data.root_state_w[:, 3:7].clone()
+
+        # Planetary reducer
+        self.planetary_reducer_pos = self.planetary_reducer.data.root_state_w[:, :3].clone()
+        self.planetary_reducer_quat = self.planetary_reducer.data.root_state_w[:, 3:7].clone()
+
+        # Pin in planetary carrier
+        self.pin_positions = []
+        self.pin_quats = []
+        for pin_local_pos in self.pin_local_positions:
+            pin_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device)
+
+            pin_quat, pin_pos = torch_utils.tf_combine(
+                self.planetary_carrier_quat, 
+                self.planetary_carrier_pos, 
+                pin_quat.unsqueeze(0), 
+                pin_local_pos.unsqueeze(0)
+            )
+
+            self.pin_positions.append(pin_pos)
+            self.pin_quats.append(pin_quat)
+
+        # tempt
+        self.sun_planetary_gear_1_state = self.sun_planetary_gear_1.data.root_state_w.clone()    # 13-DOF
 
         # Planetary carrier pins
         planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()          # [x, y, z]
@@ -983,6 +1015,9 @@ class Galaxear1GearboxAssemblyAgent:
         t = 2.0 * torch.cross(q_vec, v, dim=-1)
         rotated_pins = v + q_w * t + torch.cross(q_vec, t, dim=-1)  
         self.planetary_carrier_pin_positions = planetary_carrier_pos.unsqueeze(1) + rotated_pins
+
+    def observe_assembly_progress():
+        pass
 
     def initialize_arm_controller(self, arm_name: str):
         """
@@ -1103,7 +1138,8 @@ class Galaxear1GearboxAssemblyAgent:
             gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
 
         # Observe robot state and object state
-        self.observe()
+        self.observe_robot_state()
+        self.observe_object_state()
 
         if object_name == "planetary_carrier":
             pass
