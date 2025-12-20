@@ -52,9 +52,9 @@ x-default-isaac-lab-volumes: &default-isaac-lab-volumes
     source: ../tools
     target: ${DOCKER_ISAACLAB_PATH}/tools
   # Isaac ROS mapping
-  - type: bind
-    source: ${HOST_ISAAC_ROS_ASSETS_PATH}
-    target: ${DOCKER_ISAAC_ROS_WS}
+  # - type: bind
+  #   source: ${HOST_ISAAC_ROS_ASSETS_PATH}
+  #   target: ${DOCKER_ISAAC_ROS_WS}
     
     # The effect of these volumes is twofold:
     # 1. Prevent root-owned files from flooding the _build and logs dir
@@ -132,6 +132,28 @@ services:
         - DOCKER_NAME_SUFFIX=${DOCKER_NAME_SUFFIX-}
     image: isaac-lab-ros2${DOCKER_NAME_SUFFIX-}
     container_name: isaac-lab-ros2${DOCKER_NAME_SUFFIX-}
+    environment: *default-isaac-lab-environment
+    volumes: *default-isaac-lab-volumes
+    network_mode: host
+    deploy: *default-isaac-lab-deploy
+    # This is the entrypoint for the container
+    entrypoint: bash
+    stdin_open: true
+    tty: true
+
+  isaac-lab-foundationpose:
+    profiles: [ "foundationpose" ]
+    env_file:
+      - .env.base
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.foundationpose
+      args:
+        # Make sure that the correct Docker Name Suffix is being passed to the dockerfile, to know which base image to
+        # start from.
+        - DOCKER_NAME_SUFFIX=${DOCKER_NAME_SUFFIX-}
+    image: isaac-lab-foundationpose${DOCKER_NAME_SUFFIX-}
+    container_name: isaac-lab-foundationpose${DOCKER_NAME_SUFFIX-}
     environment: *default-isaac-lab-environment
     volumes: *default-isaac-lab-volumes
     network_mode: host
