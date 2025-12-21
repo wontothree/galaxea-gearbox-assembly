@@ -1242,8 +1242,8 @@ class Galaxear1GearboxAssemblyAgent:
 
     def pick_and_place(self,
             arm_name: str,   # left or right
-            pick_pose,
-            place_pose,
+            # pick_pose,
+            # place_pose,
             object_name: str # planetary_gear, sun_gear, planetary_carrier, ring_gear, planetary_reducer
         ) -> None:
         FSM_INITIALIZATION_STATE  = "INITIALIZATION"
@@ -1305,7 +1305,6 @@ class Galaxear1GearboxAssemblyAgent:
         target_position2_h = target_position2 + torch.tensor([0.0, 0.0, 0.1], device=self.device)
         target_position2_h_down = target_position2 + torch.tensor([0.0, 0.0, 0.02], device=self.device)
         target_orientation2 = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
-
 
         print(f"[PICK & PLACE FSM] {self.pick_and_place_fsm_state}")
         # -------------------------------------------------------------------------------------------------------------------------- #
