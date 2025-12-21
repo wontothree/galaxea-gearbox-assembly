@@ -941,6 +941,26 @@ class Galaxear1GearboxAssemblyAgent:
         self.current_ee_position_world = None
         self.current_left_gripper_state = None
         self.sun_planetary_gear_1_state = None
+
+        # observe_object_state
+        self.sun_planetary_gear_positions = []
+        self.sun_planetary_gear_quats = []
+        self.planetary_carrier_pos = None
+        self.planetary_carrier_quat = None
+        self.ring_gear_pos = None
+        self.ring_gear_quat = None
+        self.planetary_reducer_pos = None
+        self.planetary_reducer_quat = None
+        self.pin_positions = []
+        self.pin_quats = []
+
+        # observe_assembly_state
+        self.num_mounted_planetary_gears = 0
+        self.is_sun_gear_mounted = False
+        self.is_ring_gear_mounted = False
+        self.is_planetary_reducer_mounted = False
+        self.unmounted_sun_planetary_gear_positions = []
+        self.unmounted_pin_positions = []
     
     def observe_robot_state(self):
         """
@@ -1016,8 +1036,112 @@ class Galaxear1GearboxAssemblyAgent:
         rotated_pins = v + q_w * t + torch.cross(q_vec, t, dim=-1)  
         self.planetary_carrier_pin_positions = planetary_carrier_pos.unsqueeze(1) + rotated_pins
 
-    def observe_assembly_progress():
-        pass
+    def observe_assembly_state(self):
+        # Used member variables
+        pin_positions = self.pin_positions
+        pin_quats = self.pin_quats
+        sun_planetary_gear_positions = self.sun_planetary_gear_positions
+        sun_planetary_gear_quats = self.sun_planetary_gear_quats
+        planetary_carrier_pos = self.planetary_carrier_pos
+        planetary_carrier_quat = self.planetary_carrier_quat
+        ring_gear_pos = self.ring_gear_pos
+        ring_gear_quat = self.ring_gear_quat
+        planetary_reducer_pos = self.planetary_reducer_pos
+        planetary_reducer_quat = self.planetary_reducer_quat
+
+        # Constants
+        PLANETARY_GEAR_HORIZONTAL_THRESHOLD = 0.002
+        PLANETARY_GEAR_VERTICAL_THRESHOLD = 0.012
+        PLANETARY_GEAR_ORIENTATION_THRESHOLD = 0.1
+        SUN_GEAR_HORIZONTAL_THRESHOLD = 0.005
+        SUN_GEAR_VERTICAL_THRESHOLD = 0.004
+        SUN_GEAR_ORIENTATION_THRESHOLD = 0.1
+        RING_GEAR_HORIZONTAL_THRESHOLD = 0.005
+        RING_GEAR_VERTICAL_THRESHOLD = 0.004
+        RING_GEAR_ORIENTATION_THRESHOLD = 0.1
+        PLANETARY_REDUCER_HORIZONTAL_THRESHOLD = 0.005
+        PLANETARY_REDUCER_THRESHOLD = 0.002
+        PLANETARY_REDUCER_ORIENTATION_THRESHOLD = 0.1
+
+        # initialize flags
+        self.num_mounted_planetary_gears = 0
+        self.is_sun_gear_mounted = False
+        self.is_ring_gear_mounted = False
+        self.is_planetary_reducer_mounted = False
+        self.unmounted_sun_planetary_gear_positions = []
+        self.unmounted_pin_positions = []
+        
+        # How many planetary gear mounted on planetary carrier?
+        pin_occupied = [False] * len(pin_positions)
+        for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
+            sun_planetary_gear_pos = sun_planetary_gear_positions[sun_planetary_gear_idx]
+            sun_planetary_gear_quat = sun_planetary_gear_quats[sun_planetary_gear_idx]
+
+            is_mounted = False
+            for pin_idx in range(len(pin_positions)):
+                pin_pos = pin_positions[pin_idx]
+                pin_quat = pin_quats[pin_idx]
+
+                horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - pin_pos[:, :2])
+                vertical_error = sun_planetary_gear_pos[:, 2] - pin_pos[:, 2]
+                orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), pin_quat.squeeze(0)))
+
+                if (horizontal_error < PLANETARY_GEAR_HORIZONTAL_THRESHOLD and 
+                    vertical_error < PLANETARY_GEAR_VERTICAL_THRESHOLD and 
+                    orientation_error < PLANETARY_GEAR_ORIENTATION_THRESHOLD):
+                    self.num_mounted_planetary_gears += 1
+                    is_mounted = True
+                    pin_occupied[pin_idx] = True
+            
+            if not is_mounted:
+                self.unmounted_sun_planetary_gear_positions.append(self.sun_planetary_gear_positions[sun_planetary_gear_idx])
+
+        self.unmounted_pin_positions = [pin_positions[i] for i in range(len(pin_positions)) if not pin_occupied[i]]
+
+        # Is the sun gear mounted?
+        for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
+            sun_planetary_gear_pos = sun_planetary_gear_positions[sun_planetary_gear_idx]
+            sun_planetary_gear_quat = sun_planetary_gear_quats[sun_planetary_gear_idx]
+
+            horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - ring_gear_pos[:, :2])
+            vertical_error = sun_planetary_gear_pos[:, 2] - ring_gear_pos[:, 2]
+            orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), ring_gear_quat.squeeze(0)))
+
+            if (horizontal_error < SUN_GEAR_HORIZONTAL_THRESHOLD and 
+                vertical_error < SUN_GEAR_VERTICAL_THRESHOLD and 
+                orientation_error < SUN_GEAR_ORIENTATION_THRESHOLD):
+                self.is_sun_gear_mounted = True
+
+        # Is the ring gear mounted?
+        horizontal_error = torch.norm(planetary_carrier_pos[:, :2] - ring_gear_pos[:, :2])
+        vertical_error = planetary_carrier_pos[:, 2] - ring_gear_pos[:, 2]
+        orientation_error = torch.acos(torch.dot(planetary_carrier_quat.squeeze(0), ring_gear_quat.squeeze(0)))
+        if (horizontal_error < RING_GEAR_HORIZONTAL_THRESHOLD and 
+            vertical_error < RING_GEAR_VERTICAL_THRESHOLD and 
+            orientation_error < RING_GEAR_ORIENTATION_THRESHOLD):
+            self.is_ring_gear_mounted = True
+
+        # Is the planetary reducer mounted?
+        for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
+            sun_planetary_gear_pos = sun_planetary_gear_positions[sun_planetary_gear_idx]
+            sun_planetary_gear_quat = sun_planetary_gear_quats[sun_planetary_gear_idx]
+
+            horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - planetary_reducer_pos[:, :2])
+            vertical_error = sun_planetary_gear_pos[:, 2] - planetary_reducer_pos[:, 2]
+            orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), planetary_reducer_quat.squeeze(0)))
+
+            if (horizontal_error < PLANETARY_REDUCER_HORIZONTAL_THRESHOLD and 
+                vertical_error < PLANETARY_REDUCER_THRESHOLD and 
+                orientation_error < PLANETARY_REDUCER_ORIENTATION_THRESHOLD):
+                self.is_planetary_reducer_mounted = True
+
+        print("| Aseembly State                       |")
+        print("----------------------------------------")
+        print(f"| # of mounted planetary gears | {self.num_mounted_planetary_gears}     |")
+        print(f"| sun gear                     | {self.is_sun_gear_mounted} |")
+        print(f"| ring gear                    | {self.is_ring_gear_mounted} |")
+        print(f"| planetary reducer            | {self.is_planetary_reducer_mounted} |")
+        print("----------------------------------------")
 
     def initialize_arm_controller(self, arm_name: str):
         """
@@ -1118,6 +1242,8 @@ class Galaxear1GearboxAssemblyAgent:
 
     def pick_and_place(self,
             arm_name: str,   # left or right
+            pick_pose,
+            place_pose,
             object_name: str # planetary_gear, sun_gear, planetary_carrier, ring_gear, planetary_reducer
         ) -> None:
         FSM_INITIALIZATION_STATE  = "INITIALIZATION"
@@ -1140,6 +1266,7 @@ class Galaxear1GearboxAssemblyAgent:
         # Observe robot state and object state
         self.observe_robot_state()
         self.observe_object_state()
+        self.observe_assembly_state()
 
         if object_name == "planetary_carrier":
             pass
@@ -1147,7 +1274,9 @@ class Galaxear1GearboxAssemblyAgent:
             pass
         elif object_name == "planetary_reducer":
             pass
-        elif object_name == "planetary_gear" or object_name == "sun_gear":
+        elif object_name == "sun_gear":
+            pass
+        elif object_name == "planetary_gear":
             object_height_offset = 0.0
             object_state = self.sun_planetary_gear_1_state
 
@@ -1313,6 +1442,43 @@ class Galaxear1GearboxAssemblyAgent:
         elif self.pick_and_place_fsm_state == FSM_FINALIZATION_STATE:
             pass
 
+
+    def plan_planetary_gear(self):
+        # Used member variables
+        planetary_carrier_pos = self.planetary_carrier_pos
+        sun_planetary_gear_positions = self.sun_planetary_gear_positions
+        pin_positions = self.pin_positions
+
+        # How many planetary gear mounted on planetary carrier?
+        for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
+            sun_planetary_gear_pos = sun_planetary_gear_positions[sun_planetary_gear_idx]
+
+            distance = torch.norm(sun_planetary_gear_pos[:, :2] - planetary_carrier_pos[:, :2])
+
+        gear_with_distance = []
+        for gear_pos in sun_planetary_gear_positions:
+            distance = torch.norm(sun_planetary_gear_pos[:, :2] - planetary_carrier_pos[:, :2]).item()
+            gear_with_distance.append((distance, gear_pos))
+        
+        sorted_gear_with_distance = sorted(gear_with_distance, key=lambda x: x[0])
+        self.sun_planetary_gear_positions = [gear[1] for gear in sorted_gear_with_distance]
+
+
+
+
+            # for pin_idx in range(len(pin_positions)):
+            #     pin_pos = pin_positions[pin_idx]
+            #     pin_quat = pin_quats[pin_idx]
+
+            #     horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - pin_pos[:, :2])
+            #     vertical_error = sun_planetary_gear_pos[:, 2] - pin_pos[:, 2]
+            #     orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), pin_quat.squeeze(0)))
+
+            #     if horizontal_error < PLANETARY_GEAR_HORIZONTAL_THRESHOLD and vertical_error < PLANETARY_GEAR_VERTICAL_THRESHOLD and orientation_error < PLANETARY_GEAR_ORIENTATION_THRESHOLD:
+            #         self.num_mounted_planetary_gears += 1
+            #         break
+
+
     # Utility functions
     def position_reached(self, current_pos, target_pos, tol=0.02):
         return torch.norm(current_pos - target_pos, dim=1).item() < tol
@@ -1352,95 +1518,76 @@ class Context:
         self.sim = sim
         self.agent = agent
         self.fsm = None            # object of StateMachine
-
-        # Progress
-        self.planetary_gear_inserted_count = 0
-        self.sun_gear_inserted = False
-        self.ring_gear_inserted = False
-        self.planetary_reducer_inserted = False
     
     @property
-    def is_all_planetary_gear_inserted(self):
-        return self.planetary_gear_inserted_count >= self.NUM_PLANETARY_GEARS
+    def is_all_planetary_gear_mounted(self):
+        return self.agent.num_mounted_planetary_gears >= self.NUM_PLANETARY_GEARS
+        
+    @property
+    def is_sun_gear_mounted(self):
+        return self.agent.is_sun_gear_mounted
     
     @property
-    def is_sun_gear_inserted(self):
-        return self.sun_gear_inserted
+    def is_ring_gear_mounted(self):
+        return self.agent.is_ring_gear_mounted
     
     @property
-    def is_ring_gear_inserted(self):
-        return self.ring_gear_inserted
+    def is_planetary_reducer_mounted(self):
+        return self.agent.is_planetary_reducer_mounted
     
-    @property
-    def is_planetary_reducer_inserted(self):
-        return self.planetary_reducer_inserted
-    
-    def on_planetary_gear_inserted(self):
-        if self.planetary_gear_inserted_count < self.NUM_PLANETARY_GEARS:
-            self.planetary_gear_inserted_count += 1
-
-    def on_sun_gear_inserted(self):
-        self.sun_gear_inserted = True
-    
-    def on_ring_gear_inserted(self):
-        self.ring_gear_inserted = True
-
-    def on_planetary_reducer_inserted(self):
-        self.planetary_reducer_inserted = True
-
-    def reset(self):
-        self.planetary_gear_inserted_count = 0
-        self.sun_gear_inserted = False
-        self.ring_gear_inserted = False
-        self.planetary_reducer_inserted = False
-
 # -------------------------------------------------------------------------------------------------------------------------- #
 # [FSM Start State] Initialization ----------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
 class InitializationState(State):
     def enter(self, context):
         print("[FSM Start State] Initialization: enter")
-        context.reset()
+        # context.reset()
 
     def update(self, context):
+        # [State Transition] Initialization -> Planetary Gear Mounting
         if context.fsm is not None:
-            context.fsm.transition_to(PlanetaryGearInsertionState())
+            context.fsm.transition_to(PlanetaryGearMountingState())
 
     def exit(self, context):
         print("[FSM Start State] Initialization: exit")
 
 # -------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Intermediate State] Planetary Gear Insertion ------------------------------------------------------------------------ #
+# [FSM Intermediate State] Planetary Gear Mounting ------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
-class PlanetaryGearInsertionState(State):
+class PlanetaryGearMountingState(State):
     def enter(self, context):
-        print("[FSM Intermediate State] Planetary Gear Insertion: enter")
+        print("[FSM Intermediate State] Planetary Gear Mounting: enter")
 
     def update(self, context):
         context.agent.pick_and_place(
             arm_name="left",
             object_name="planetary_gear"
         )
+        
+        if context.agent.pick_and_place_fsm_state == "FINALIZATION":
+            # [State Transition] Planetary Gear Mounting -> Sun Gear Mounting
+            if context.is_all_planetary_gear_mounted:
+                context.fsm.transition_to(SunGearMountingState())
 
     def exit(self, context):
-        print("[FSM Intermediate State] Planetary Gear Insertion: exit")
+        print("[FSM Intermediate State] Planetary Gear Mounting: exit")
 
 # -------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Intermediate State] Sun Gear Insertion ------------------------------------------------------------------------------ #
+# [FSM Intermediate State] Sun Gear Mounting ------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
-class SunGearInsertionState(State):
+class SunGearMountingState(State):
     pass
 
 # -------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Intermediate State] Ring Gear Insertion ----------------------------------------------------------------------------- #
+# [FSM Intermediate State] Ring Gear Mounting ------------------------------------------------------------------------------ #
 # -------------------------------------------------------------------------------------------------------------------------- #
-class RingGearInsertionState(State):
+class RingGearMountingState(State):
     pass
 
 # -------------------------------------------------------------------------------------------------------------------------- #
-# [FSM Intermediate State] Planetary Reducer Insertion --------------------------------------------------------------------- #
+# [FSM Intermediate State] Planetary Reducer Mounting ---------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
-class PlanetaryReducerInsertionState(State):
+class PlanetaryReducerMountingState(State):
     pass
 
 # -------------------------------------------------------------------------------------------------------------------------- #
