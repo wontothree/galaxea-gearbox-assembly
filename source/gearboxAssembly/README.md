@@ -80,15 +80,9 @@ $$
 
 # Classes
 
-|Class||Function|
+|Class|||
 |---|---|---|
-|`Galaxear1GearboxAssemblyAgent`||initialize_arm_controller|
-|||observe_robot_state|
-|||observe_object_state|
-|||observe_assembly_progress|
-|||initialize_arm_controller|
-|||solve_inverse_kinematics|
-|||pick_and_place|
+|`Galaxear1GearboxAssemblyAgent`|||
 |`State`|abstract class for states|
 |`StateMachine`|managing states|
 |`Context`||
@@ -98,6 +92,18 @@ $$
 |`RingGearInsertionState`||
 |`PlanetaryReducerInsertionState`||
 |`FinalizationState`||
+
+`Galaxear1GearboxAssemblyAgent`
+
+|Member Functions||
+|---|---|
+|initialize_arm_controller||
+|observe_robot_state||
+|observe_object_state||
+|observe_assembly_state||
+|initialize_arm_controller||
+|solve_inverse_kinematics||
+|pick_and_place||
 
 FSM → Context → Robot
 
