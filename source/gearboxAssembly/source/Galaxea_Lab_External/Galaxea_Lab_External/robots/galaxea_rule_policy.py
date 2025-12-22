@@ -883,6 +883,7 @@ from isaaclab.controllers import (
     DifferentialIKControllerCfg,
 )
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils.math import subtract_frame_transforms      # Transformation from world to base coordinate
 class Galaxear1GearboxAssemblyAgent:
     def __init__(self,
             sim: sim_utils.SimulationContext,
@@ -918,10 +919,10 @@ class Galaxear1GearboxAssemblyAgent:
         self.grasping_height = -0.003
 
         # Initial target pose and orientation
-        self.target_position_left = torch.tensor([0.3864, 0.5237, 1.1475], device=self.device)
-        self.target_orientation_left = torch.tensor([0.0, -1.0, 0.0, 0.0], device=self.device)
-        self.target_position_right = torch.tensor([0.3864, -0.5237, 1.1475], device=self.device)
-        self.target_orientation_right = torch.tensor([0.0, -1.0, 0.0, 0.0], device=self.device)
+        self.initial_left_arm_pos = torch.tensor([0.3864, 0.5237, 1.1475], device=self.device)
+        self.initial_left_arm_quat = torch.tensor([0.0, -1.0, 0.0, 0.0], device=self.device)
+        self.initial_right_arm_pos = torch.tensor([0.3864, -0.5237, 1.1475], device=self.device)
+        self.initial_right_arm_quat = torch.tensor([0.0, -1.0, 0.0, 0.0], device=self.device)
 
         # Initialize arm controller
         self.left_diff_ik_controller, self.left_arm_entity_cfg, self.left_gripper_entity_cfg = self.initialize_arm_controller("left")
@@ -933,14 +934,14 @@ class Galaxear1GearboxAssemblyAgent:
         self.joint_position_command = None
         self.joint_command_ids = None
 
-        # pick and place
-        self.pick_and_place_fsm_state = "PICK_READY"
-        self.pick_and_place_fsm_timer = 0
-
-        # State
-        self.current_ee_position_world = None
+        # observe_robot_state
+        self.left_ee_pos_w = None
+        self.left_ee_quat_w = None
+        self.right_ee_pos_w = None
+        self.right_ee_quat_w = None
+        self.base_pos_w = None
+        self.base_quat_w = None
         self.current_left_gripper_state = None
-        self.sun_planetary_gear_1_state = None
 
         # observe_object_state
         self.sun_planetary_gear_positions = []
@@ -960,19 +961,44 @@ class Galaxear1GearboxAssemblyAgent:
         self.is_ring_gear_mounted = False
         self.is_planetary_reducer_mounted = False
         self.unmounted_sun_planetary_gear_positions = []
+        self.unmounted_sun_planetary_gear_quats = []
         self.unmounted_pin_positions = []
+
+        # pick and place
+        self.pick_and_place_fsm_state = "PICK_READY"
+        self.pick_and_place_fsm_timer = 0
     
     def observe_robot_state(self):
         """
         update robot state: simulation ground truth
         """
-        # end effector
+        # end effector (simulation ground truth)
         left_arm_body_ids = self.left_arm_entity_cfg.body_ids
-        self.current_ee_position_world = self.robot.data.body_state_w[                    # simulation ground truth
+        right_arm_body_ids = self.right_arm_entity_cfg.body_ids
+        self.left_ee_pos_w = self.robot.data.body_state_w[          
             :,
             left_arm_body_ids[0],
             0:3
         ]
+        self.left_ee_quat_w = self.robot.data.body_state_w[
+            :,
+            left_arm_body_ids[0],
+            3:7
+        ]
+        self.right_ee_pos_w = self.robot.data.body_state_w[        
+            :,
+            right_arm_body_ids[0],
+            0:3
+        ]
+        self.right_ee_quat_w = self.robot.data.body_state_w[
+            :,
+            right_arm_body_ids[0],
+            3:7
+        ]
+
+        # Base
+        self.base_pos_w  = self.robot.data.root_state_w[:, 0:3]
+        self.base_quat_w = self.robot.data.root_state_w[:, 3:7]
 
         # gripper
         left_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
@@ -1022,20 +1048,6 @@ class Galaxear1GearboxAssemblyAgent:
             self.pin_positions.append(pin_pos)
             self.pin_quats.append(pin_quat)
 
-        # tempt
-        self.sun_planetary_gear_1_state = self.sun_planetary_gear_1.data.root_state_w.clone()    # 13-DOF
-
-        # Planetary carrier pins
-        planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()          # [x, y, z]
-        planetary_carrier_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()        # [q_w, q_x, q_y, q_z]
-        pin_locals = torch.stack(self.pin_local_positions)
-        q_w = planetary_carrier_quat[:, 0].view(-1, 1, 1)
-        q_vec = planetary_carrier_quat[:, 1:].unsqueeze(1)
-        v = pin_locals.unsqueeze(0)
-        t = 2.0 * torch.cross(q_vec, v, dim=-1)
-        rotated_pins = v + q_w * t + torch.cross(q_vec, t, dim=-1)  
-        self.planetary_carrier_pin_positions = planetary_carrier_pos.unsqueeze(1) + rotated_pins
-
     def observe_assembly_state(self):
         # Used member variables
         pin_positions = self.pin_positions
@@ -1063,12 +1075,13 @@ class Galaxear1GearboxAssemblyAgent:
         PLANETARY_REDUCER_THRESHOLD = 0.002
         PLANETARY_REDUCER_ORIENTATION_THRESHOLD = 0.1
 
-        # initialize flags
+        # initialize
         self.num_mounted_planetary_gears = 0
         self.is_sun_gear_mounted = False
         self.is_ring_gear_mounted = False
         self.is_planetary_reducer_mounted = False
         self.unmounted_sun_planetary_gear_positions = []
+        self.unmounted_sun_planetary_gear_quats = []
         self.unmounted_pin_positions = []
         
         # How many planetary gear mounted on planetary carrier?
@@ -1095,8 +1108,47 @@ class Galaxear1GearboxAssemblyAgent:
             
             if not is_mounted:
                 self.unmounted_sun_planetary_gear_positions.append(self.sun_planetary_gear_positions[sun_planetary_gear_idx])
+                self.unmounted_sun_planetary_gear_quats.append(self.sun_planetary_gear_quats[sun_planetary_gear_idx])
 
         self.unmounted_pin_positions = [pin_positions[i] for i in range(len(pin_positions)) if not pin_occupied[i]]
+
+        if len(self.unmounted_pin_positions) > 0 and len(self.unmounted_sun_planetary_gear_positions) > 0:
+            # sort unmounted planetary geas by distance to planetary carrier
+            # stack to tensors
+            gear_positions = torch.stack(self.unmounted_sun_planetary_gear_positions).squeeze(1)  # [N, 3]
+            gear_quats = torch.stack(self.unmounted_sun_planetary_gear_quats).squeeze(1)          # [N, 4]
+
+            # XY-plane distance
+            gear_distances = torch.norm(
+                gear_positions[:, :2] - planetary_carrier_pos[:, :2],
+                dim=1
+            )
+            # sort pins (closest first)
+            sorted_gear_indices = torch.argsort(gear_distances)
+
+            # apply sorting
+            self.unmounted_sun_planetary_gear_positions = [
+                gear_positions[i].unsqueeze(0) for i in sorted_gear_indices
+            ]
+            self.unmounted_sun_planetary_gear_quats = [
+                gear_quats[i].unsqueeze(0) for i in sorted_gear_indices
+            ]
+
+            # sort unmounted pins by distance to the closest unmounted planetary gear
+            # stack pin positions to tensor
+            pin_positions_tensor = torch.stack(self.unmounted_pin_positions).squeeze(1)  # [M, 3]
+            reference_gear_pos = self.unmounted_sun_planetary_gear_positions[0].squeeze(0)
+
+            pin_distances = torch.norm(
+                pin_positions_tensor[:, :2] - reference_gear_pos[:2],
+                dim=1
+            )
+
+            sorted_pin_indices = torch.argsort(pin_distances)
+
+            self.unmounted_pin_positions = [
+                pin_positions_tensor[i].unsqueeze(0) for i in sorted_pin_indices
+            ]
 
         # Is the sun gear mounted?
         for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
@@ -1178,21 +1230,34 @@ class Galaxear1GearboxAssemblyAgent:
     # End effector control by differential inverse kinematics (need to remove simulation ground truth dependency)
     def solve_inverse_kinematics(self,
             arm_name: str,
-            target_ee_position_base: torch.Tensor,
-            target_ee_orientation_base: torch.Tensor
+            target_ee_pos_b: torch.Tensor,
+            target_ee_quat_b: torch.Tensor
         ):
         """
         target_ee_pose, current_joint_pose -> inverse kinematics -> desired_joint_pose
         """
+        left_ee_pos_w = self.left_ee_pos_w
+        left_ee_quat_w = self.left_ee_quat_w
+        right_ee_pos_w = self.right_ee_pos_w
+        right_ee_quat_w = self.right_ee_quat_w
+        base_pos_w = self.base_pos_w
+        base_quat_w = self.base_quat_w
+
         # Arm selection and configuration
         if arm_name == "left":
             arm_joint_ids = self.left_arm_entity_cfg.joint_ids
             arm_body_ids = self.left_arm_entity_cfg.body_ids
             diff_ik_controller = self.left_diff_ik_controller
+
+            ee_pos_w = left_ee_pos_w
+            ee_quat_w = left_ee_quat_w
         elif arm_name == "right":
             arm_joint_ids = self.right_arm_entity_cfg.joint_ids
             arm_body_ids = self.right_arm_entity_cfg.body_ids
             diff_ik_controller = self.right_diff_ik_controller
+
+            ee_pos_w = right_ee_pos_w
+            ee_quat_w = right_ee_quat_w
 
         if self.robot.is_fixed_base:                                             # True
             ee_jacobi_idx = arm_body_ids[0] - 1                                  # index of end effector jacobian
@@ -1201,23 +1266,17 @@ class Galaxear1GearboxAssemblyAgent:
 
         # Get the target position and orientation of the arm
         ik_commands = torch.cat(
-            [target_ee_position_base, target_ee_orientation_base], 
+            [target_ee_pos_b, target_ee_quat_b], 
             dim=-1
         )
         diff_ik_controller.set_command(ik_commands)
 
         # Inverse kinematics solver
-        current_ee_pose_world = self.robot.data.body_state_w[                    # simulation ground truth
-            :,
-            arm_body_ids[0],
-            0:7
-        ]
-        current_base_pose_world = self.robot.data.root_state_w[:, 0:7]           # constant if is_fixed_base
-        current_ee_position_base, current_ee_quaternion_base = subtract_frame_transforms(
-            current_base_pose_world[:, 0:3],
-            current_base_pose_world[:, 3:7],
-            current_ee_pose_world[:, 0:3],
-            current_ee_pose_world[:, 3:7],
+        ee_pos_b, ee_quat_b = subtract_frame_transforms(
+            base_pos_w,
+            base_quat_w,
+            ee_pos_w,
+            ee_quat_w
         )
 
         jacobian = self.robot.root_physx_view.get_jacobians()[
@@ -1232,8 +1291,8 @@ class Galaxear1GearboxAssemblyAgent:
         ]
         # compute the joint commands
         desired_arm_joint_position = diff_ik_controller.compute(
-            current_ee_position_base, 
-            current_ee_quaternion_base,
+            ee_pos_b, 
+            ee_quat_b,
             jacobian, 
             current_arm_joint_pose
         )
@@ -1241,11 +1300,25 @@ class Galaxear1GearboxAssemblyAgent:
         return desired_arm_joint_position, arm_joint_ids
 
     def pick_and_place(self,
-            arm_name: str,   # left or right
-            # pick_pose,
-            # place_pose,
             object_name: str # planetary_gear, sun_gear, planetary_carrier, ring_gear, planetary_reducer
         ) -> None:
+        # Observe robot state and object state
+        self.observe_robot_state()
+        self.observe_object_state()
+        self.observe_assembly_state()
+
+        # Used member variables
+        unmounted_sun_planetary_gear_positions = self.unmounted_sun_planetary_gear_positions
+        unmounted_sun_planetary_gear_quats = self.unmounted_sun_planetary_gear_quats
+        unmounted_pin_positions = self.unmounted_pin_positions
+        initial_left_arm_pos = self.initial_left_arm_pos
+        initial_right_arm_pos = self.initial_right_arm_pos
+        left_ee_pos_w = self.left_ee_pos_w
+        right_ee_pos_w = self.right_ee_pos_w
+        base_pos_w = self.base_pos_w
+        base_quat_w = self.base_quat_w
+
+        # Constant state names in finite state machine
         FSM_INITIALIZATION_STATE  = "INITIALIZATION"
         FSM_PICK_READY_STATE      = "PICK_READY"
         FSM_PICK_APPROACH_STATE   = "PICK_APPROACH"
@@ -1257,17 +1330,6 @@ class Galaxear1GearboxAssemblyAgent:
         FSM_PLACE_COMPLETE_STATE  = "PLACE_COMPLETE"
         FSM_FINALIZATION_STATE    = "FINALIZATION"
 
-        # Gripper selection and configuration
-        if arm_name == "left":
-            gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
-        elif arm_name == "right":
-            gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
-
-        # Observe robot state and object state
-        self.observe_robot_state()
-        self.observe_object_state()
-        self.observe_assembly_state()
-
         if object_name == "planetary_carrier":
             pass
         elif object_name == "ring_gear":
@@ -1278,33 +1340,76 @@ class Galaxear1GearboxAssemblyAgent:
             pass
         elif object_name == "planetary_gear":
             object_height_offset = 0.0
-            object_state = self.sun_planetary_gear_1_state
 
-        target_position = object_state[:, :3].clone()
-        target_position[:, 2] = self.table_height + self.grasping_height + object_height_offset
-        target_position = target_position + torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
+        if len(self.unmounted_pin_positions) >= 1:
+            # Pick
+            target_pick_pos_w = unmounted_sun_planetary_gear_positions[0].clone()
+            target_pick_quat_w = unmounted_sun_planetary_gear_quats[0].clone()
+            
+            target_pick_pos_w[:, 2] = self.table_height + self.grasping_height + object_height_offset
+            target_pick_pos_w = target_pick_pos_w + torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
 
-        target_orientation = object_state[:, 3:7].clone()
-        # Rotate the target orientation 180 degrees around the y-axis
-        target_orientation, target_position = torch_utils.tf_combine(
-            target_orientation, 
-            target_position,
-            torch.tensor([[0.0, 1.0, 0.0, 0.0]], device=self.device), 
-            torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
-        )
+            target_pick_quat_w, target_pick_pos_w = torch_utils.tf_combine( # Rotate the target orientation 180 degrees around the y-axis
+                target_pick_quat_w, 
+                target_pick_pos_w,
+                torch.tensor([[0.0, 1.0, 0.0, 0.0]], device=self.device), 
+                torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
+            )
+            target_pick_ready_pos_w = target_pick_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
 
-        # approeach position (above 10cm)
-        target_position_h = target_position + torch.tensor([0.0, 0.0, 0.1], device=self.device)
+            # Transform coordinate from world to base
+            target_pick_pos_b, target_pick_quat_b = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_pick_pos_w,
+                target_pick_quat_w   
+            )
+            target_pick_ready_pos_b, _ = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_pick_ready_pos_w,
+                target_pick_quat_w  
+            )
 
-        # place
-        target_position2 = self.planetary_carrier_pin_positions[:, 1, :].clone()
-        target_position2[:, 2] = self.table_height + self.grasping_height
-        target_position2[:, 2] += object_height_offset
-        target_position2 += torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
-        
-        target_position2_h = target_position2 + torch.tensor([0.0, 0.0, 0.1], device=self.device)
-        target_position2_h_down = target_position2 + torch.tensor([0.0, 0.0, 0.02], device=self.device)
-        target_orientation2 = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
+            # Place
+            target_place_pos_w = unmounted_pin_positions[0].clone()
+            target_place_pos_w[:, 2] = self.table_height + self.grasping_height
+            target_place_pos_w[:, 2] += object_height_offset
+            target_place_pos_w += torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
+            target_place_quat_w = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
+            target_place_ready_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
+            target_place_approach_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.02], device=self.device)
+
+            target_place_pos_b, target_place_quat_b = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_place_pos_w,
+                target_place_quat_w   
+            )
+            target_place_ready_pos_b, _ = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_place_ready_pos_w,
+                target_place_quat_w   
+            )
+            target_place_approach_pos_b, _ = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_place_approach_pos_w,
+                target_place_quat_w   
+            )
+
+        # Decide arm and gripper configuration
+        dist_left = torch.norm(target_pick_pos_w - initial_left_arm_pos)
+        dist_right = torch.norm(target_pick_pos_w - initial_right_arm_pos)
+        if dist_left <= dist_right:
+            arm_name = "left"
+            gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
+            ee_pos_w = left_ee_pos_w
+        else:
+            arm_name = "right"
+            gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
+            ee_pos_w = right_ee_pos_w
 
         print(f"[PICK & PLACE FSM] {self.pick_and_place_fsm_state}")
         # -------------------------------------------------------------------------------------------------------------------------- #
@@ -1320,14 +1425,14 @@ class Galaxear1GearboxAssemblyAgent:
         elif self.pick_and_place_fsm_state == FSM_PICK_READY_STATE:
             desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
                 arm_name=arm_name,
-                target_ee_position_base=target_position_h, 
-                target_ee_orientation_base=target_orientation
+                target_ee_pos_b=target_pick_ready_pos_b, 
+                target_ee_quat_b=target_pick_quat_b
             )
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = joint_ids
 
             # [State Transition] PICK_READY -> PICK_APPROACH
-            if self.position_reached(self.current_ee_position_world, target_position_h):
+            if self.position_reached(ee_pos_w, target_pick_ready_pos_w):
                 self.pick_and_place_fsm_state = FSM_PICK_APPROACH_STATE
             
         # -------------------------------------------------------------------------------------------------------------------------- #
@@ -1336,14 +1441,14 @@ class Galaxear1GearboxAssemblyAgent:
         elif self.pick_and_place_fsm_state == FSM_PICK_APPROACH_STATE:
             desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
                 arm_name=arm_name,
-                target_ee_position_base=target_position, 
-                target_ee_orientation_base=target_orientation
+                target_ee_pos_b=target_pick_pos_b, 
+                target_ee_quat_b=target_pick_quat_b
             )
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = joint_ids
 
             # [State Transition] PICK_APPROACH -> PICK_EXECUTION
-            if self.position_reached(self.current_ee_position_world, target_position):
+            if self.position_reached(ee_pos_w, target_pick_pos_w):
                 self.pick_and_place_fsm_state = FSM_PICK_EXECUTION_STATE
 
         # -------------------------------------------------------------------------------------------------------------------------- #
@@ -1355,54 +1460,55 @@ class Galaxear1GearboxAssemblyAgent:
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = joint_ids
 
-            # [State Transition] PICK_EXECUTION -> FSM_PICK_COMPLETE_STATE
+            # [State Transition] PICK_EXECUTION -> FSM_PICK_COMPLETE
             self.pick_and_place_fsm_timer += 1
-            if self.pick_and_place_fsm_timer > 50:
+            if self.pick_and_place_fsm_timer > 30:
                 self.pick_and_place_fsm_timer = 0
                 self.pick_and_place_fsm_state = FSM_PICK_COMPLETE_STATE
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PICK_COMPLETE_STATE ------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PICK_COMPLETE ------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         elif self.pick_and_place_fsm_state == FSM_PICK_COMPLETE_STATE:
+            # [State Transition] FSM_PICK_COMPLETE -> FSM_PLACE_READY
             self.pick_and_place_fsm_state = FSM_PLACE_READY_STATE
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PLACE_READY_STATE --------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_READY --------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         elif self.pick_and_place_fsm_state == FSM_PLACE_READY_STATE:
             desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
                 arm_name=arm_name,
-                target_ee_position_base=target_position2_h, 
-                target_ee_orientation_base=target_orientation2
+                target_ee_pos_b=target_place_ready_pos_b, 
+                target_ee_quat_b=target_place_quat_b
             )
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = joint_ids
 
-            # [State Transition] FSM_PLACE_READY_STATE -> FSM_PLACE_APPROACH_STATE
-            if self.position_reached(self.current_ee_position_world, target_position2_h):
+            # [State Transition] FSM_PLACE_READY -> FSM_PLACE_APPROACH
+            if self.position_reached(ee_pos_w, target_place_ready_pos_w):
                 self.pick_and_place_fsm_state = FSM_PLACE_APPROACH_STATE
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PLACE_APPROACH_STATE ------------------------------------------------------------------------ #
+        # [FSM Intermediate State] FSM_PLACE_APPROACH ------------------------------------------------------------------------------ #
         # -------------------------------------------------------------------------------------------------------------------------- #
         elif self.pick_and_place_fsm_state == FSM_PLACE_APPROACH_STATE:
             desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
                 arm_name=arm_name,
-                target_ee_position_base=target_position2_h_down, 
-                target_ee_orientation_base=target_orientation2
+                target_ee_pos_b=target_place_approach_pos_b, 
+                target_ee_quat_b=target_place_quat_b
             )
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = joint_ids
 
-            # [State Transition] FSM_PLACE_APPROACH_STATE -> FSM_PLACE_EXECUTION_STATE
+            # [State Transition] FSM_PLACE_APPROACH -> FSM_PLACE_EXECUTION
             self.pick_and_place_fsm_timer += 1
-            if self.position_reached(self.current_ee_position_world, target_position2_h_down) and self.pick_and_place_fsm_timer > 30: # 30
+            if self.position_reached(ee_pos_w, target_place_approach_pos_w) and self.pick_and_place_fsm_timer > 50: # 30
                 self.pick_and_place_fsm_timer = 0
                 self.pick_and_place_fsm_state = FSM_PLACE_EXECUTION_STATE
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PLACE_EXECUTION_STATE ----------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_EXECUTION ----------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         elif self.pick_and_place_fsm_state == FSM_PLACE_EXECUTION_STATE:
             joint_ids = gripper_joint_ids
@@ -1413,70 +1519,33 @@ class Galaxear1GearboxAssemblyAgent:
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = joint_ids
 
-            # [State Transition] FSM_PLACE_EXECUTION_STATE -> FSM_PLACE_COMPLETE_STATE
+            # [State Transition] FSM_PLACE_EXECUTION -> FSM_PLACE_COMPLETE
             self.pick_and_place_fsm_timer += 1
             if self.pick_and_place_fsm_timer > 100:
                 self.pick_and_place_fsm_timer = 0
                 self.pick_and_place_fsm_state = FSM_PLACE_COMPLETE_STATE
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PLACE_COMPLETE_STATE ------------------------------------------------------------------------ #
+        # [FSM Intermediate State] FSM_PLACE_COMPLETE ------------------------------------------------------------------------------ #
         # -------------------------------------------------------------------------------------------------------------------------- #
         elif self.pick_and_place_fsm_state == FSM_PLACE_COMPLETE_STATE:
             desired_joint_position, joint_ids = self.solve_inverse_kinematics( 
                 arm_name=arm_name,
-                target_ee_position_base=target_position2_h, 
-                target_ee_orientation_base=target_orientation2
+                target_ee_pos_b=target_place_ready_pos_b, 
+                target_ee_quat_b=target_place_quat_b
             )
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = joint_ids
 
-            # [State Transition] FSM_PLACE_COMPLETE_STATE -> FSM_FINALIZATION_STATE
-            if self.position_reached(self.current_ee_position_world, target_position2_h):
+            # [State Transition] FSM_PLACE_COMPLETE -> FSM_FINALIZATION
+            if self.position_reached(ee_pos_w, target_place_ready_pos_w):
                 self.pick_and_place_fsm_state = FSM_FINALIZATION_STATE
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM End State] FSM_FINALIZATION_STATE ----------------------------------------------------------------------------------- #
+        # [FSM End State] FSM_FINALIZATION ----------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         elif self.pick_and_place_fsm_state == FSM_FINALIZATION_STATE:
             pass
-
-
-    def plan_planetary_gear(self):
-        # Used member variables
-        planetary_carrier_pos = self.planetary_carrier_pos
-        sun_planetary_gear_positions = self.sun_planetary_gear_positions
-        pin_positions = self.pin_positions
-
-        # How many planetary gear mounted on planetary carrier?
-        for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
-            sun_planetary_gear_pos = sun_planetary_gear_positions[sun_planetary_gear_idx]
-
-            distance = torch.norm(sun_planetary_gear_pos[:, :2] - planetary_carrier_pos[:, :2])
-
-        gear_with_distance = []
-        for gear_pos in sun_planetary_gear_positions:
-            distance = torch.norm(sun_planetary_gear_pos[:, :2] - planetary_carrier_pos[:, :2]).item()
-            gear_with_distance.append((distance, gear_pos))
-        
-        sorted_gear_with_distance = sorted(gear_with_distance, key=lambda x: x[0])
-        self.sun_planetary_gear_positions = [gear[1] for gear in sorted_gear_with_distance]
-
-
-
-
-            # for pin_idx in range(len(pin_positions)):
-            #     pin_pos = pin_positions[pin_idx]
-            #     pin_quat = pin_quats[pin_idx]
-
-            #     horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - pin_pos[:, :2])
-            #     vertical_error = sun_planetary_gear_pos[:, 2] - pin_pos[:, 2]
-            #     orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), pin_quat.squeeze(0)))
-
-            #     if horizontal_error < PLANETARY_GEAR_HORIZONTAL_THRESHOLD and vertical_error < PLANETARY_GEAR_VERTICAL_THRESHOLD and orientation_error < PLANETARY_GEAR_ORIENTATION_THRESHOLD:
-            #         self.num_mounted_planetary_gears += 1
-            #         break
-
 
     # Utility functions
     def position_reached(self, current_pos, target_pos, tol=0.02):
@@ -1559,7 +1628,6 @@ class PlanetaryGearMountingState(State):
 
     def update(self, context):
         context.agent.pick_and_place(
-            arm_name="left",
             object_name="planetary_gear"
         )
         
