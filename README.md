@@ -54,6 +54,7 @@ python -m pip install -e source/Galaxea_Lab_External
 ```bash
 cd source/gearboxAssembly
 python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras
+# or
 python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
 ```
 
