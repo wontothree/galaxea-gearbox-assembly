@@ -95,8 +95,6 @@ class Galaxear1GearboxAssemblyAgent:
         self.pick_and_place_fsm_timer = 0
         self.active_arm_name = None
         self.active_gripper_joint_ids = None
-        self.active_initial_arm_pos_w = None
-        self.active_initial_arm_quat_w = None
     
     def observe_robot_state(self):
         """
@@ -231,9 +229,6 @@ class Galaxear1GearboxAssemblyAgent:
                 horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - pin_pos[:, :2])
                 vertical_error = sun_planetary_gear_pos[:, 2] - pin_pos[:, 2]
                 orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), pin_quat.squeeze(0)))
-                # orientation_error = torch.acos(
-                #     torch.clamp(torch.abs(torch.dot(sun_planetary_gear_quat.squeeze(0), pin_quat.squeeze(0))), -1.0, 1.0)
-                # )
 
                 if (horizontal_error < PLANETARY_GEAR_HORIZONTAL_THRESHOLD and 
                     vertical_error < PLANETARY_GEAR_VERTICAL_THRESHOLD and 
@@ -435,6 +430,331 @@ class Galaxear1GearboxAssemblyAgent:
         desired_arm_joint_ids = arm_joint_ids
 
         return desired_arm_joint_position, desired_arm_joint_ids
+
+    def pick_and_place(self,
+            object_name: str # planetary_gear, sun_gear, planetary_carrier, ring_gear, planetary_reducer
+        ) -> None:
+        # Observe robot state and object state
+        self.observe_robot_state()
+        self.observe_object_state()
+        self.observe_assembly_state()
+
+        # Used member variables
+        unmounted_sun_planetary_gear_positions = self.unmounted_sun_planetary_gear_positions
+        unmounted_sun_planetary_gear_quats = self.unmounted_sun_planetary_gear_quats
+        unmounted_pin_positions = self.unmounted_pin_positions
+        initial_left_ee_pos_w = self.initial_left_ee_pos_w
+        initial_left_ee_quat_w = self.initial_left_ee_quat_w
+        initial_right_ee_pos_w = self.initial_right_ee_pos_w
+        initial_right_ee_quat_w = self.initial_right_ee_quat_w
+        base_pos_w = self.base_pos_w
+        base_quat_w = self.base_quat_w
+
+        left_ee_pos_w = self.left_ee_pos_w
+        right_ee_pos_w = self.right_ee_pos_w
+
+        # Constant state names in finite state machine
+        FSM_INITIALIZATION_STATE  = "INITIALIZATION"
+        FSM_PICK_READY_STATE      = "PICK_READY"
+        FSM_PICK_APPROACH_STATE   = "PICK_APPROACH"
+        FSM_PICK_EXECUTION_STATE  = "PICK_EXECUTION"
+        FSM_PICK_COMPLETE_STATE   = "PICK_COMPLETE"
+        FSM_PLACE_READY_STATE     = "PLACE_READY"
+        FSM_PLACE_APPROACH_STATE  = "PLACE_APPROACH"
+        FSM_PLACE_EXECUTION_STATE = "PLACE_EXECUTION"
+        FSM_PLACE_COMPLETE_STATE  = "PLACE_COMPLETE"
+        FSM_FINALIZATION_STATE    = "FINALIZATION"
+
+        TIME_CONSTANT_50 = 50
+        TIME_CONSTANT_100 = 100
+        TIME_CONSTANT_200 = 200
+
+        if object_name == "planetary_carrier":
+            pass
+        elif object_name == "ring_gear":
+            pass
+        elif object_name == "planetary_reducer":
+            pass
+        elif object_name == "sun_gear":
+            pass
+        elif object_name == "planetary_gear":
+            object_height_offset = 0.0
+
+        if len(self.unmounted_pin_positions) >= 1:
+            # Pick
+            target_pick_pos_w = unmounted_sun_planetary_gear_positions[0].clone()
+            target_pick_quat_w = unmounted_sun_planetary_gear_quats[0].clone()
+            
+            target_pick_pos_w[:, 2] = self.table_height + self.grasping_height + object_height_offset
+            target_pick_pos_w = target_pick_pos_w + torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
+
+            target_pick_quat_w, target_pick_pos_w = torch_utils.tf_combine( # Rotate the target orientation 180 degrees around the y-axis
+                target_pick_quat_w, 
+                target_pick_pos_w,
+                torch.tensor([[0.0, 1.0, 0.0, 0.0]], device=self.device), 
+                torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
+            )
+            target_pick_ready_pos_w = target_pick_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
+
+            # Transform coordinate from world to base
+            target_pick_pos_b, target_pick_quat_b = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_pick_pos_w,
+                target_pick_quat_w   
+            )
+            target_pick_ready_pos_b, _ = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_pick_ready_pos_w,
+                target_pick_quat_w  
+            )
+
+            # Place
+            target_place_pos_w = unmounted_pin_positions[0].clone()
+            target_place_pos_w[:, 2] = self.table_height + self.grasping_height
+            target_place_pos_w[:, 2] += object_height_offset
+            target_place_pos_w += torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
+            target_place_quat_w = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
+            target_place_ready_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
+            target_place_approach_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.02], device=self.device)
+
+            _, target_place_quat_b = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_place_pos_w,
+                target_place_quat_w   
+            )
+            target_place_ready_pos_b, _ = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_place_ready_pos_w,
+                target_place_quat_w   
+            )
+            target_place_approach_pos_b, _ = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                target_place_approach_pos_w,
+                target_place_quat_w   
+            )
+
+        print(f"[PICK & PLACE FSM] {self.pick_and_place_fsm_state}")
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Start State] INITIALIZATION ----------------------------------------------------------------------------------------- # 
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        if self.pick_and_place_fsm_state == FSM_INITIALIZATION_STATE:
+            initial_left_ee_pos_b, initial_left_ee_quat_b = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                initial_left_ee_pos_w,
+                initial_left_ee_quat_w   
+            )
+            initial_right_ee_pos_b, initial_right_ee_quat_b = subtract_frame_transforms(
+                base_pos_w,
+                base_quat_w,
+                initial_right_ee_pos_w,
+                initial_right_ee_quat_w   
+            )
+            desired_left_joint_position, desired_left_joint_ids = self.solve_inverse_kinematics( 
+                arm_name="left",
+                target_ee_pos_b=initial_left_ee_pos_b, 
+                target_ee_quat_b=initial_left_ee_quat_b
+            )
+            desired_right_joint_position, desired_right_joint_ids = self.solve_inverse_kinematics( 
+                arm_name="right",
+                target_ee_pos_b=initial_right_ee_pos_b, 
+                target_ee_quat_b=initial_right_ee_quat_b
+            )
+            self.joint_position_command = torch.cat([desired_left_joint_position, desired_right_joint_position], dim=1)
+            self.joint_command_ids = torch.tensor(desired_left_joint_ids + desired_right_joint_ids, device=self.device)
+
+            # Decide arm and gripper configuration
+            dist_left = torch.norm(target_pick_pos_w - initial_left_ee_pos_w)
+            dist_right = torch.norm(target_pick_pos_w - initial_right_ee_pos_w)
+            if dist_left <= dist_right:
+                self.active_arm_name = "left"
+                self.active_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
+            else:
+                self.active_arm_name = "right"
+                self.active_gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
+
+            # [State Transition] INITIALIZATION -> PICK_READY
+            self.pick_and_place_fsm_timer += 1
+            if self.pick_and_place_fsm_timer > TIME_CONSTANT_50:
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PICK_READY_STATE
+
+        arm_name = self.active_arm_name
+        gripper_joint_ids = self.active_gripper_joint_ids
+        if arm_name == "left":
+            ee_pos_w = left_ee_pos_w
+        else:
+            ee_pos_w = right_ee_pos_w
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] PICK_READY -------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        if self.pick_and_place_fsm_state == FSM_PICK_READY_STATE:
+            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_pos_b=target_pick_ready_pos_b, 
+                target_ee_quat_b=target_pick_quat_b
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = desired_joint_ids
+
+            # [State Transition] PICK_READY -> PICK_APPROACH
+            self.pick_and_place_fsm_timer += 1
+            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_50:
+            #     self.pick_and_place_fsm_timer = 0
+            if (self.position_reached(ee_pos_w, target_pick_ready_pos_w) and 
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_50 or 
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PICK_APPROACH_STATE
+            
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] PICK_APPROACH ----------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PICK_APPROACH_STATE:
+            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_pos_b=target_pick_pos_b, 
+                target_ee_quat_b=target_pick_quat_b
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = desired_joint_ids
+
+            # [State Transition] PICK_APPROACH -> PICK_EXECUTION
+            self.pick_and_place_fsm_timer += 1
+            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_100:
+            #     self.pick_and_place_fsm_timer = 0
+            if (self.position_reached(ee_pos_w, target_pick_pos_w) and 
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_100 or 
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PICK_EXECUTION_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] PICK_EXECUTION ---------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PICK_EXECUTION_STATE:
+            desired_joint_position = torch.tensor([[0.0, 0.0]], device=self.device)
+            desired_joint_ids = gripper_joint_ids
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = desired_joint_ids
+
+            # [State Transition] PICK_EXECUTION -> FSM_PICK_COMPLETE
+            self.pick_and_place_fsm_timer += 1
+            if self.pick_and_place_fsm_timer > TIME_CONSTANT_100:
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PICK_COMPLETE_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PICK_COMPLETE ------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PICK_COMPLETE_STATE:
+            # [State Transition] FSM_PICK_COMPLETE -> FSM_PLACE_READY
+            self.pick_and_place_fsm_timer += 1
+            if self.pick_and_place_fsm_timer > TIME_CONSTANT_50:
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PLACE_READY_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_READY --------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PLACE_READY_STATE:
+            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_pos_b=target_place_ready_pos_b, 
+                target_ee_quat_b=target_place_quat_b
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = desired_joint_ids
+
+            # [State Transition] FSM_PLACE_READY -> FSM_PLACE_APPROACH
+            self.pick_and_place_fsm_timer += 1
+            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_100:
+            #     self.pick_and_place_fsm_timer = 0
+            if (self.position_reached(ee_pos_w, target_place_ready_pos_w) and 
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_50 or 
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PLACE_APPROACH_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_APPROACH ------------------------------------------------------------------------------ #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PLACE_APPROACH_STATE:
+            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_pos_b=target_place_approach_pos_b, 
+                target_ee_quat_b=target_place_quat_b
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = desired_joint_ids
+
+            # [State Transition] FSM_PLACE_APPROACH -> FSM_PLACE_EXECUTION
+            self.pick_and_place_fsm_timer += 1
+            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_100:
+            #     self.pick_and_place_fsm_timer = 0
+            self.pick_and_place_fsm_timer += 1
+            if (self.position_reached(ee_pos_w, target_place_approach_pos_w) and 
+                self.pick_and_place_fsm_timer > 100 or 
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PLACE_EXECUTION_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_EXECUTION ----------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PLACE_EXECUTION_STATE:
+            desired_joint_ids = gripper_joint_ids
+            num_gripper_joints = len(desired_joint_ids)
+            desired_joint_position = torch.full(
+                (num_gripper_joints,), 0.4, device=self.device
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = desired_joint_ids
+
+            # [State Transition] FSM_PLACE_EXECUTION -> FSM_PLACE_COMPLETE
+            self.pick_and_place_fsm_timer += 1
+            if self.pick_and_place_fsm_timer > TIME_CONSTANT_100:
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_PLACE_COMPLETE_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM Intermediate State] FSM_PLACE_COMPLETE ------------------------------------------------------------------------------ #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_PLACE_COMPLETE_STATE:
+            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+                arm_name=arm_name,
+                target_ee_pos_b=target_place_ready_pos_b, 
+                target_ee_quat_b=target_place_quat_b
+            )
+            self.joint_position_command = desired_joint_position
+            self.joint_command_ids = desired_joint_ids
+
+            # [State Transition] FSM_PLACE_COMPLETE -> FSM_FINALIZATION
+            self.pick_and_place_fsm_timer += 1
+            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_50:
+            #     self.pick_and_place_fsm_timer = 0
+            if (self.position_reached(ee_pos_w, target_place_ready_pos_w) and 
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_50 or
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
+                self.pick_and_place_fsm_timer = 0
+                self.pick_and_place_fsm_state = FSM_FINALIZATION_STATE
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [FSM End State] FSM_FINALIZATION ----------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        elif self.pick_and_place_fsm_state == FSM_FINALIZATION_STATE:
+            # [State Transition] FSM_PLACE_COMPLETE -> FSM_FINALIZATION
+            self.pick_and_place_fsm_timer += 1
+            if self.pick_and_place_fsm_timer > TIME_CONSTANT_50:
+                self.pick_and_place_fsm_timer = 0
+                self.reset_pick_and_place()
+
 
     # def pick_and_place(self,
     #         object_name: str # planetary_gear, sun_gear, planetary_carrier, ring_gear, planetary_reducer
@@ -723,314 +1043,11 @@ class Galaxear1GearboxAssemblyAgent:
     #         # self.joint_command_ids = desired_joint_ids
     #         pass
 
-    def pick_and_place(self,
-            object_name: str # planetary_gear, sun_gear, planetary_carrier, ring_gear, planetary_reducer
-        ) -> None:
-        # Observe robot state and object state
-        self.observe_robot_state()
-        self.observe_object_state()
-        self.observe_assembly_state()
-
-        # Used member variables
-        unmounted_sun_planetary_gear_positions = self.unmounted_sun_planetary_gear_positions
-        unmounted_sun_planetary_gear_quats = self.unmounted_sun_planetary_gear_quats
-        unmounted_pin_positions = self.unmounted_pin_positions
-        initial_left_ee_pos_w = self.initial_left_ee_pos_w
-        initial_left_ee_quat_w = self.initial_left_ee_quat_w
-        initial_right_ee_pos_w = self.initial_right_ee_pos_w
-        initial_right_ee_quat_w = self.initial_right_ee_quat_w
-        left_ee_pos_w = self.left_ee_pos_w
-        right_ee_pos_w = self.right_ee_pos_w
-        base_pos_w = self.base_pos_w
-        base_quat_w = self.base_quat_w
-
-        # Constant state names in finite state machine
-        FSM_INITIALIZATION_STATE  = "INITIALIZATION"
-        FSM_PICK_READY_STATE      = "PICK_READY"
-        FSM_PICK_APPROACH_STATE   = "PICK_APPROACH"
-        FSM_PICK_EXECUTION_STATE  = "PICK_EXECUTION"
-        FSM_PICK_COMPLETE_STATE   = "PICK_COMPLETE"
-        FSM_PLACE_READY_STATE     = "PLACE_READY"
-        FSM_PLACE_APPROACH_STATE  = "PLACE_APPROACH"
-        FSM_PLACE_EXECUTION_STATE = "PLACE_EXECUTION"
-        FSM_PLACE_COMPLETE_STATE  = "PLACE_COMPLETE"
-        FSM_FINALIZATION_STATE    = "FINALIZATION"
-
-        if object_name == "planetary_carrier":
-            pass
-        elif object_name == "ring_gear":
-            pass
-        elif object_name == "planetary_reducer":
-            pass
-        elif object_name == "sun_gear":
-            pass
-        elif object_name == "planetary_gear":
-            object_height_offset = 0.0
-
-        if len(self.unmounted_pin_positions) >= 1:
-            # Pick
-            target_pick_pos_w = unmounted_sun_planetary_gear_positions[0].clone()
-            target_pick_quat_w = unmounted_sun_planetary_gear_quats[0].clone()
-            
-            target_pick_pos_w[:, 2] = self.table_height + self.grasping_height + object_height_offset
-            target_pick_pos_w = target_pick_pos_w + torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
-
-            target_pick_quat_w, target_pick_pos_w = torch_utils.tf_combine( # Rotate the target orientation 180 degrees around the y-axis
-                target_pick_quat_w, 
-                target_pick_pos_w,
-                torch.tensor([[0.0, 1.0, 0.0, 0.0]], device=self.device), 
-                torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
-            )
-            target_pick_ready_pos_w = target_pick_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
-
-            # Transform coordinate from world to base
-            target_pick_pos_b, target_pick_quat_b = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_pick_pos_w,
-                target_pick_quat_w   
-            )
-            target_pick_ready_pos_b, _ = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_pick_ready_pos_w,
-                target_pick_quat_w  
-            )
-
-            # Place
-            target_place_pos_w = unmounted_pin_positions[0].clone()
-            target_place_pos_w[:, 2] = self.table_height + self.grasping_height
-            target_place_pos_w[:, 2] += object_height_offset
-            target_place_pos_w += torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
-            target_place_quat_w = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
-            target_place_ready_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
-            target_place_approach_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.02], device=self.device)
-
-            _, target_place_quat_b = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_place_pos_w,
-                target_place_quat_w   
-            )
-            target_place_ready_pos_b, _ = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_place_ready_pos_w,
-                target_place_quat_w   
-            )
-            target_place_approach_pos_b, _ = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_place_approach_pos_w,
-                target_place_quat_w   
-            )
-
-        # # Decide arm and gripper configuration
-        # dist_left = torch.norm(target_pick_pos_w - initial_left_ee_pos_w)
-        # dist_right = torch.norm(target_pick_pos_w - initial_right_ee_pos_w)
-        # if dist_left <= dist_right:
-        #     arm_name = "left"
-        #     gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
-        #     ee_pos_w = left_ee_pos_w
-        # else:
-        #     arm_name = "right"
-        #     gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
-        #     ee_pos_w = right_ee_pos_w
-
-        print(f"[PICK & PLACE FSM] {self.pick_and_place_fsm_state}")
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Start State] INITIALIZATION ----------------------------------------------------------------------------------------- # 
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        if self.pick_and_place_fsm_state == FSM_INITIALIZATION_STATE:
-            initial_left_ee_pos_b, initial_left_ee_quat_b = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                initial_left_ee_pos_w,
-                initial_left_ee_quat_w   
-            )
-            initial_right_ee_pos_b, initial_right_ee_quat_b = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                initial_right_ee_pos_w,
-                initial_right_ee_quat_w   
-            )
-            desired_left_joint_position, desired_left_joint_ids = self.solve_inverse_kinematics( 
-                arm_name="left",
-                target_ee_pos_b=initial_left_ee_pos_b, 
-                target_ee_quat_b=initial_left_ee_quat_b
-            )
-            desired_right_joint_position, desired_right_joint_ids = self.solve_inverse_kinematics( 
-                arm_name="right",
-                target_ee_pos_b=initial_right_ee_pos_b, 
-                target_ee_quat_b=initial_right_ee_quat_b
-            )
-            self.joint_position_command = torch.cat([desired_left_joint_position, desired_right_joint_position], dim=1)
-            self.joint_command_ids = torch.tensor(desired_left_joint_ids + desired_right_joint_ids, device=self.device)
-
-            # Decide arm and gripper configuration
-            dist_left = torch.norm(target_pick_pos_w - initial_left_ee_pos_w)
-            dist_right = torch.norm(target_pick_pos_w - initial_right_ee_pos_w)
-            if dist_left <= dist_right:
-                self.active_arm_name = "left"
-                self.active_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
-                self.active_initial_arm_pos_w = initial_left_ee_pos_w
-                self.active_initial_arm_quat_w = initial_left_ee_quat_w
-            else:
-                self.active_arm_name = "right"
-                self.active_gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
-                self.active_initial_arm_pos_w = initial_right_ee_pos_w
-                self.active_initial_arm_quat_w = initial_right_ee_quat_w
-
-            # [State Transition] INITIALIZATION -> PICK_READY
-            self.pick_and_place_fsm_timer += 1
-            if self.pick_and_place_fsm_timer > 50:
-                self.pick_and_place_fsm_timer = 0
-                self.pick_and_place_fsm_state = FSM_PICK_READY_STATE
-
-        arm_name = self.active_arm_name
-        gripper_joint_ids = self.active_gripper_joint_ids
-        initial_arm_pos_w = self.active_initial_arm_pos_w
-        initial_arm_quat_w = self.active_initial_arm_quat_w
-        if arm_name == "left":
-            ee_pos_w = left_ee_pos_w
-        else:
-            ee_pos_w = right_ee_pos_w
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] PICK_READY -------------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        if self.pick_and_place_fsm_state == FSM_PICK_READY_STATE:
-            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
-                arm_name=arm_name,
-                target_ee_pos_b=target_pick_ready_pos_b, 
-                target_ee_quat_b=target_pick_quat_b
-            )
-            self.joint_position_command = desired_joint_position
-            self.joint_command_ids = desired_joint_ids
-
-            # [State Transition] PICK_READY -> PICK_APPROACH
-            if self.position_reached(ee_pos_w, target_pick_ready_pos_w):
-                self.pick_and_place_fsm_state = FSM_PICK_APPROACH_STATE
-            
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] PICK_APPROACH ----------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        elif self.pick_and_place_fsm_state == FSM_PICK_APPROACH_STATE:
-            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
-                arm_name=arm_name,
-                target_ee_pos_b=target_pick_pos_b, 
-                target_ee_quat_b=target_pick_quat_b
-            )
-            self.joint_position_command = desired_joint_position
-            self.joint_command_ids = desired_joint_ids
-
-            # [State Transition] PICK_APPROACH -> PICK_EXECUTION
-            if self.position_reached(ee_pos_w, target_pick_pos_w):
-                self.pick_and_place_fsm_state = FSM_PICK_EXECUTION_STATE
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] PICK_EXECUTION ---------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        elif self.pick_and_place_fsm_state == FSM_PICK_EXECUTION_STATE:
-            desired_joint_position = torch.tensor([[0.0, 0.0]], device=self.device)
-            desired_joint_ids = gripper_joint_ids
-            self.joint_position_command = desired_joint_position
-            self.joint_command_ids = desired_joint_ids
-
-            # [State Transition] PICK_EXECUTION -> FSM_PICK_COMPLETE
-            self.pick_and_place_fsm_timer += 1
-            if self.pick_and_place_fsm_timer > 30:
-                self.pick_and_place_fsm_timer = 0
-                self.pick_and_place_fsm_state = FSM_PICK_COMPLETE_STATE
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PICK_COMPLETE ------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        elif self.pick_and_place_fsm_state == FSM_PICK_COMPLETE_STATE:
-            # [State Transition] FSM_PICK_COMPLETE -> FSM_PLACE_READY
-            self.pick_and_place_fsm_state = FSM_PLACE_READY_STATE
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PLACE_READY --------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        elif self.pick_and_place_fsm_state == FSM_PLACE_READY_STATE:
-            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
-                arm_name=arm_name,
-                target_ee_pos_b=target_place_ready_pos_b, 
-                target_ee_quat_b=target_place_quat_b
-            )
-            self.joint_position_command = desired_joint_position
-            self.joint_command_ids = desired_joint_ids
-
-            # [State Transition] FSM_PLACE_READY -> FSM_PLACE_APPROACH
-            if self.position_reached(ee_pos_w, target_place_ready_pos_w):
-                self.pick_and_place_fsm_state = FSM_PLACE_APPROACH_STATE
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PLACE_APPROACH ------------------------------------------------------------------------------ #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        elif self.pick_and_place_fsm_state == FSM_PLACE_APPROACH_STATE:
-            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
-                arm_name=arm_name,
-                target_ee_pos_b=target_place_approach_pos_b, 
-                target_ee_quat_b=target_place_quat_b
-            )
-            self.joint_position_command = desired_joint_position
-            self.joint_command_ids = desired_joint_ids
-
-            # [State Transition] FSM_PLACE_APPROACH -> FSM_PLACE_EXECUTION
-            self.pick_and_place_fsm_timer += 1
-            if self.position_reached(ee_pos_w, target_place_approach_pos_w) and self.pick_and_place_fsm_timer > 50: # 30
-                self.pick_and_place_fsm_timer = 0
-                self.pick_and_place_fsm_state = FSM_PLACE_EXECUTION_STATE
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PLACE_EXECUTION ----------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        elif self.pick_and_place_fsm_state == FSM_PLACE_EXECUTION_STATE:
-            desired_joint_ids = gripper_joint_ids
-            num_gripper_joints = len(desired_joint_ids)
-            desired_joint_position = torch.full(
-                (num_gripper_joints,), 0.4, device=self.device
-            )
-            self.joint_position_command = desired_joint_position
-            self.joint_command_ids = desired_joint_ids
-
-            # [State Transition] FSM_PLACE_EXECUTION -> FSM_PLACE_COMPLETE
-            self.pick_and_place_fsm_timer += 1
-            if self.pick_and_place_fsm_timer > 100:
-                self.pick_and_place_fsm_timer = 0
-                self.pick_and_place_fsm_state = FSM_PLACE_COMPLETE_STATE
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM Intermediate State] FSM_PLACE_COMPLETE ------------------------------------------------------------------------------ #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        elif self.pick_and_place_fsm_state == FSM_PLACE_COMPLETE_STATE:
-            desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
-                arm_name=arm_name,
-                target_ee_pos_b=target_place_ready_pos_b, 
-                target_ee_quat_b=target_place_quat_b
-            )
-            self.joint_position_command = desired_joint_position
-            self.joint_command_ids = desired_joint_ids
-
-            # [State Transition] FSM_PLACE_COMPLETE -> FSM_FINALIZATION
-            self.pick_and_place_fsm_timer += 1
-            if self.pick_and_place_fsm_timer > 50:
-                self.pick_and_place_fsm_timer = 0
-                self.pick_and_place_fsm_state = FSM_FINALIZATION_STATE
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [FSM End State] FSM_FINALIZATION ----------------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        elif self.pick_and_place_fsm_state == FSM_FINALIZATION_STATE:
-            self.reset_pick_and_place()
-
     def reset_pick_and_place(self):
         self.pick_and_place_fsm_state = "INITIALIZATION"
         self.pick_and_place_fsm_timer = 0
 
     # Utility functions
-    def position_reached(self, current_pos, target_pos, tol=0.02):
+    def position_reached(self, current_pos, target_pos, tol=0.01):
         error = torch.norm(current_pos - target_pos, dim=1)
         return torch.all(error < tol)
