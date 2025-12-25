@@ -59,4 +59,11 @@ python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v
 ```
 
 This project is tested in the environment of Docker and Window 11.
+
+## Training
+
+```bash
+python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
+```
+
 ---
