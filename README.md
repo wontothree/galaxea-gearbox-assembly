@@ -28,28 +28,23 @@ git lfs pull
 git clone https://github.com/wontothree/galaxear1-gearbox-assembly.git
 ```
 
-2. Create the Docker container
+2. Create the Docker container or run the container
 
 ```bash
 cd galaxear1-gearbox-assembly
 ./docker/container.py start
-```
-
-3. Run the container
-
-```bash
-cd galaxear1-gearbox-assembly
+# or
 ./docker/container.py enter
 ```
 
-4. Install dependencies
+3. Install dependencies
 
 ```bash
 cd galaxear1-gearbox-assembly/source/gearboxAssembly
 python -m pip install -e source/Galaxea_Lab_External
 ```
 
-5. Run the Policy in the IsaacLab
+4. Run the Policy in the IsaacLab
 
 ```bash
 cd source/gearboxAssembly
@@ -64,6 +59,125 @@ This project is tested in the environment of Docker and Window 11.
 
 ```bash
 python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
+```
+
+## Getting Started
+
+### [Docker Image 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
+
+1. Create the container or run the container
+
+```bash
+cd galaxear1-gearbox-assembly
+./docker/container.py start ros2
+# or
+./docker/container.py enter ros2 
+```
+
+```bash
+export ROS_DOMAIN_ID=0
+export PYTHONPATH=/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/rclpy:$PYTHONPATH
+```
+
+Check out the ROS
+
+```bash
+source /opt/ros/jazzy/setup.bash
+ros2 topic list
+```
+
+2. Install dependencies
+
+```bash
+cd galaxear1-gearbox-assembly/source/gearboxAssembly
+python -m pip install -e source/Galaxea_Lab_External
+```
+
+3. Run the simulation
+
+```bash
+cd source/gearboxAssembly
+python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
+```
+
+4. Set `Extensions` up in Isaac Sim
+
+`Window` -> `Extensions`
+
+- OMNIGRAPH ACTION GRAPH EDITOR: `ENABLED` & `AUTOLOAD`
+- OMNIGRAPH ACTION GRAPH: `ENABLED` & `AUTOLOAD`
+- ROS 2 BRIDGE: `ENABLED` & `AUTOLOAD`
+
+5. Connect the Action Graph
+
+`Window` -> `Graph Editors` -> `Action Graph`
+
+Node `On Playback Trick` -> Node `Isaac Create Render Product` -> Node `ROS2 Camera Helper
+`
+![Action Graph](docs/images/action-graph.png)
+
+6. Publish the topics
+
+- Click the node `Isaac Create Render Product`
+- `Inputs` > `cameraPrim` > click `/World/envs/env_0/Robot/zed_link/head_cam/head_cam` in the drag drop
+- Play
+
+7. Check the topic list out
+
+In the other terminal,
+
+```bash
+cd galaxear1-gearbox-assembly
+./docker/container.py enter ros2 
+
+source /opt/ros/jazzy/setup.bash
+ros2 topic list
+```
+
+### [Docker Image 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
+
+1. Build the Docker image of Isaac ROS
+
+```bash
+export ROS_DOMAIN_ID=0
+xhost +local:docker
+cd galaxear1-gearbox-assembly/isaac_ros_docker
+docker build -t isaac_ros .
+```
+
+2. Run the container
+
+```bash
+cd galaxear1-gearbox-assembly/isaac_ros_docker
+chmod +x run.sh
+./run.sh
+```
+
+3. Open the additional window on the same container
+
+
+```bash
+docker ps
+docker exec -it isaac_ros bash
+docker exec -it -u root isaac_ros /bin/bash
+
+```
+
+4. Build the packages
+
+```bash
+export ISAAC_ROS_WS=/workspace/isaac_ros_ws
+echo $ISAAC_ROS_WS
+source /opt/ros/jazzy/setup.bash
+cd ${ISAAC_ROS_WS}/ && \
+   colcon build --symlink-install --packages-up-to isaac_ros_foundationpose --base-paths ${ISAAC_ROS_WS}/src/isaac_ros_pose_estimation/isaac_ros_foundationpose
+
+cd ${ISAAC_ROS_WS} && \
+   colcon build --symlink-install --packages-up-to isaac_ros_rtdetr --base-paths ${ISAAC_ROS_WS}/src/isaac_ros_object_detection/isaac_ros_rtdetr
+```
+
+```bash
+source ${ISAAC_ROS_WS}/install/setup.bash
 ```
 
 ---
