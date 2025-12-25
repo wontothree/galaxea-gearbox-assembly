@@ -166,9 +166,13 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         #     ),
         #     dim=-1,
         # )
-        obs = dict(rgb=rgb, left_hand_rgb=left_hand_rgb, right_hand_rgb=right_hand_rgb,
-            left_arm_joint_pos=self.left_arm_joint_pos, right_arm_joint_pos=self.right_arm_joint_pos,
-            left_gripper_joint_pos=self.left_gripper_joint_pos, right_gripper_joint_pos=self.right_gripper_joint_pos)
+
+        obs = dict(
+            left_arm_joint_pos=self.left_arm_joint_pos, 
+            right_arm_joint_pos=self.right_arm_joint_pos,
+            left_gripper_joint_pos=self.left_gripper_joint_pos, 
+            right_gripper_joint_pos=self.right_gripper_joint_pos
+        )
             
         observations = {"policy": obs}
         return observations
@@ -274,8 +278,9 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         score, time_cost = self.evaluate_score()
         print(f"score: {score}")
+        reward_tensor = torch.full((self.num_envs,), score, device=self.device, dtype=torch.float32)
 
-        return score
+        return reward_tensor
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         finish_task = torch.tensor(self.evaluate_score() == 6, device=self.device)
@@ -468,7 +473,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         self.rule_policy.set_initial_root_state(self.initial_root_state)
         self.rule_policy.prepare_mounting_plan()
 
-        joint_pos = self.robot.data.default_joint_pos[env_ids, self._joint_idx]
+        # joint_pos = self.robot.data.default_joint_pos[env_ids, self._joint_idx]
+        joint_pos = self.robot.data.default_joint_pos[env_ids][:, self._joint_idx]
         # joint_pos[:, self._joint_idx] += sample_uniform(
         #     self.cfg.initial_joint_angle_range[0] * math.pi,
         #     self.cfg.initial_joint_angle_range[1] * math.pi,
