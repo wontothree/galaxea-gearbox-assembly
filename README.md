@@ -2,7 +2,7 @@
 
   # Gearbox Assembly by Galaxea R1
   
-  We, Jensen Lovers, participated in Robotic Collaborative Assembling Challenge (RoCo Challenge) - HMI Workshop @ AAAI 2026 
+  We participated in Robotic Collaborative Assembling Challenge (RoCo Challenge) - HMI Workshop @ AAAI 2026 
 
   [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html)
   [![IsaacLab](https://img.shields.io/badge/IsaacLab-2.3.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/isaac_lab_tutorials/index.html)
