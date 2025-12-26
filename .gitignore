@@ -69,3 +69,9 @@ tests/
 
 # Docker history
 .isaac-lab-docker-history
+
+# Isaac ROS workspace
+isaac_ros_ws/build/
+isaac_ros_ws/install/
+isaac_ros_ws/log/
+# isaac_ros_ws/isaac_ros_assets/

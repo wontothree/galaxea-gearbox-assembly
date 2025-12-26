@@ -193,7 +193,7 @@ class Galaxear1GearboxAssemblyAgent:
         planetary_reducer_quat = self.planetary_reducer_quat
 
         # Constants
-        PLANETARY_GEAR_HORIZONTAL_THRESHOLD = 0.002
+        PLANETARY_GEAR_HORIZONTAL_THRESHOLD = 0.002 + 0.008
         PLANETARY_GEAR_VERTICAL_THRESHOLD = 0.012
         PLANETARY_GEAR_ORIENTATION_THRESHOLD = 0.1 + 100 # to dismiss orientation
         SUN_GEAR_HORIZONTAL_THRESHOLD = 0.005
@@ -467,7 +467,7 @@ class Galaxear1GearboxAssemblyAgent:
 
         TIME_CONSTANT_50 = 50
         TIME_CONSTANT_100 = 100
-        TIME_CONSTANT_200 = 200
+        TIME_CONSTANT_200 = 300
 
         if object_name == "planetary_carrier":
             pass
@@ -605,8 +605,6 @@ class Galaxear1GearboxAssemblyAgent:
 
             # [State Transition] PICK_READY -> PICK_APPROACH
             self.pick_and_place_fsm_timer += 1
-            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_50:
-            #     self.pick_and_place_fsm_timer = 0
             if (self.position_reached(ee_pos_w, target_pick_ready_pos_w) and 
                 self.pick_and_place_fsm_timer > TIME_CONSTANT_50 or 
                 self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
@@ -627,8 +625,6 @@ class Galaxear1GearboxAssemblyAgent:
 
             # [State Transition] PICK_APPROACH -> PICK_EXECUTION
             self.pick_and_place_fsm_timer += 1
-            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_100:
-            #     self.pick_and_place_fsm_timer = 0
             if (self.position_reached(ee_pos_w, target_pick_pos_w) and 
                 self.pick_and_place_fsm_timer > TIME_CONSTANT_100 or 
                 self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
@@ -674,8 +670,6 @@ class Galaxear1GearboxAssemblyAgent:
 
             # [State Transition] FSM_PLACE_READY -> FSM_PLACE_APPROACH
             self.pick_and_place_fsm_timer += 1
-            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_100:
-            #     self.pick_and_place_fsm_timer = 0
             if (self.position_reached(ee_pos_w, target_place_ready_pos_w) and 
                 self.pick_and_place_fsm_timer > TIME_CONSTANT_50 or 
                 self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
@@ -696,12 +690,8 @@ class Galaxear1GearboxAssemblyAgent:
 
             # [State Transition] FSM_PLACE_APPROACH -> FSM_PLACE_EXECUTION
             self.pick_and_place_fsm_timer += 1
-            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_100:
-            #     self.pick_and_place_fsm_timer = 0
-            self.pick_and_place_fsm_timer += 1
             if (self.position_reached(ee_pos_w, target_place_approach_pos_w) and 
-                self.pick_and_place_fsm_timer > 100 or 
-                self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
+                self.pick_and_place_fsm_timer > TIME_CONSTANT_100):
                 self.pick_and_place_fsm_timer = 0
                 self.pick_and_place_fsm_state = FSM_PLACE_EXECUTION_STATE
 
@@ -737,8 +727,6 @@ class Galaxear1GearboxAssemblyAgent:
 
             # [State Transition] FSM_PLACE_COMPLETE -> FSM_FINALIZATION
             self.pick_and_place_fsm_timer += 1
-            # if self.pick_and_place_fsm_timer > TIME_CONSTANT_50:
-            #     self.pick_and_place_fsm_timer = 0
             if (self.position_reached(ee_pos_w, target_place_ready_pos_w) and 
                 self.pick_and_place_fsm_timer > TIME_CONSTANT_50 or
                 self.pick_and_place_fsm_timer > TIME_CONSTANT_200):
