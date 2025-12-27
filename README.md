@@ -28,28 +28,24 @@ git lfs pull
 git clone https://github.com/wontothree/galaxear1-gearbox-assembly.git
 ```
 
-2. Create the Docker container or run the container
+2. Create the Docker container and run the container
 
 ```bash
 cd galaxear1-gearbox-assembly
-./docker/container.py start
-# or
-./docker/container.py enter
+./docker/container.py enter base
 ```
 
 3. Install dependencies
 
 ```bash
-cd galaxear1-gearbox-assembly/source/gearboxAssembly
+cd /workspace/isaaclab/source/gearboxAssembly
 python -m pip install -e source/Galaxea_Lab_External
 ```
 
 4. Run the Policy in the IsaacLab
 
 ```bash
-cd source/gearboxAssembly
-python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras
-# or
+cd /workspace/isaaclab/source/gearboxAssembly
 python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
 ```
 
@@ -136,34 +132,40 @@ ros2 topic list
 
 ### [Docker Image 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
 
-1. Build the Docker image of Isaac ROS
+1. Build the Docker image of Isaac ROS and run the container
 
 ```bash
 export ROS_DOMAIN_ID=0
 xhost +local:docker
 cd galaxear1-gearbox-assembly/isaac_ros_docker
 docker build -t isaac_ros .
-```
 
-2. Run the container
-
-```bash
-cd galaxear1-gearbox-assembly/isaac_ros_docker
 chmod +x run.sh
 ./run.sh
 ```
 
-3. Open the additional window on the same container
+2. Open the additional window on the same container
 
 
 ```bash
 docker ps
-docker exec -it isaac_ros bash
 docker exec -it -u root isaac_ros /bin/bash
-
+# or
+docker exec -d -u root isaac_ros /bin/bash
 ```
 
-4. Build the packages
+3. Install the dependencies
+
+```bash
+export ISAAC_ROS_WS=/workspace/isaac_ros_ws
+echo $ISAAC_ROS_WS
+sudo apt-get update
+rosdep update && rosdep install --from-paths ${ISAAC_ROS_WS}/src/isaac_ros_pose_estimation/isaac_ros_foundationpose --ignore-src -y
+
+rosdep update && rosdep install --from-paths ${ISAAC_ROS_WS}/src/isaac_ros_object_detection/isaac_ros_rtdetr --ignore-src -y
+```
+
+3. Build the packages
 
 ```bash
 export ISAAC_ROS_WS=/workspace/isaac_ros_ws
@@ -178,6 +180,7 @@ cd ${ISAAC_ROS_WS} && \
 
 ```bash
 source ${ISAAC_ROS_WS}/install/setup.bash
+source install/setup.bash
 ```
 
 ---
