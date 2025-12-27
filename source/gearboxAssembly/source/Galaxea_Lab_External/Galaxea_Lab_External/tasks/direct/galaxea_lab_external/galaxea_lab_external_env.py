@@ -150,29 +150,26 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         rgb = self.head_camera.data.output[data_type]
         left_hand_rgb = self.left_hand_camera.data.output[data_type]
         right_hand_rgb = self.right_hand_camera.data.output[data_type]
-        # print(f"rgb: {rgb.shape}")
-        # print(f"left_hand_rgb: {left_hand_rgb.shape}")
-        # print(f"right_hand_rgb: {right_hand_rgb.shape}")
 
-        # obs = torch.cat(
-        #     (
-        #         rgb,
-        #         left_hand_rgb,
-        #         right_hand_rgb,
-        #         self.left_arm_joint_pos.unsqueeze(dim=1),
-        #         self.right_arm_joint_pos.unsqueeze(dim=1),
-        #         self.left_gripper_joint_pos.unsqueeze(dim=1),
-        #         self.right_gripper_joint_pos.unsqueeze(dim=1),
-        #     ),
-        #     dim=-1,
-        # )
-
-        obs = dict(
-            left_arm_joint_pos=self.left_arm_joint_pos, 
-            right_arm_joint_pos=self.right_arm_joint_pos,
-            left_gripper_joint_pos=self.left_gripper_joint_pos, 
-            right_gripper_joint_pos=self.right_gripper_joint_pos
+        obs = torch.cat(
+            (
+                # rgb,
+                # left_hand_rgb,
+                # right_hand_rgb,
+                self.left_arm_joint_pos.unsqueeze(dim=1),
+                self.right_arm_joint_pos.unsqueeze(dim=1),
+                self.left_gripper_joint_pos.unsqueeze(dim=1),
+                self.right_gripper_joint_pos.unsqueeze(dim=1),
+            ),
+            dim=-1,
         )
+
+        # obs = dict(
+        #     left_arm_joint_pos=self.left_arm_joint_pos, 
+        #     right_arm_joint_pos=self.right_arm_joint_pos,
+        #     left_gripper_joint_pos=self.left_gripper_joint_pos, 
+        #     right_gripper_joint_pos=self.right_gripper_joint_pos
+        # )
             
         observations = {"policy": obs}
         return observations
