@@ -32,8 +32,8 @@ from isaaclab.sim.spawners.materials import spawn_rigid_body_material
 
 from isaaclab.sim import SimulationContext
 
-from ..agent.agent import Galaxear1GearboxAssemblyAgent
-from ..agent.finite_state_machine import StateMachine, Context, InitializationState
+from ..jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
+from ..jensen_lovers_agent.finite_state_machine import StateMachine, Context, InitializationState
 
 class GalaxeaRulePolicy:
     def __init__(self, sim: sim_utils.SimulationContext, scene: InteractiveScene, obj_dict: dict):
@@ -197,7 +197,7 @@ class GalaxeaRulePolicy:
 
         # add
         # ------------------------------------------------------
-        self.agent = Galaxear1GearboxAssemblyAgent(
+        self.agent = GalaxeaGearboxAssemblyAgent(
             sim=sim,
             scene=scene,
             obj_dict=obj_dict
