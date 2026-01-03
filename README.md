@@ -25,13 +25,14 @@
 git lfs install
 git lfs pull
 
-git clone https://github.com/wontothree/galaxear1-gearbox-assembly.git
+git clone https://github.com/wontothree/galaxea-gearbox-assembly.git
 ```
 
 2. Create the Docker container and run the container
 
 ```bash
-cd galaxear1-gearbox-assembly
+cd galaxea-gearbox-assembly
+./docker/container.py start base
 ./docker/container.py enter base
 ```
 
@@ -51,12 +52,12 @@ python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v
 
 ## Getting Started
 
-### [Docker Image 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
+### [Docker 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
 
 1. Create the container or run the container
 
 ```bash
-cd galaxear1-gearbox-assembly
+cd galaxe1-gearbox-assembly
 ./docker/container.py start ros2
 # or
 ./docker/container.py enter ros2 
@@ -77,7 +78,7 @@ ros2 topic list
 2. Install dependencies
 
 ```bash
-cd galaxear1-gearbox-assembly/source/gearboxAssembly
+cd galaxea-gearbox-assembly/source/gearboxAssembly
 python -m pip install -e source/Galaxea_Lab_External
 ```
 
@@ -115,21 +116,21 @@ Node `On Playback Trick` -> Node `Isaac Create Render Product` -> Node `ROS2 Cam
 In the other terminal,
 
 ```bash
-cd galaxear1-gearbox-assembly
+cd galaxea-gearbox-assembly
 ./docker/container.py enter ros2 
 
 source /opt/ros/jazzy/setup.bash
 ros2 topic list
 ```
 
-### [Docker Image 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
+### [Docker 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
 
 1. Build the Docker image of Isaac ROS and run the container
 
 ```bash
 export ROS_DOMAIN_ID=0
 xhost +local:docker
-cd galaxear1-gearbox-assembly/isaac_ros_docker
+cd galaxea-gearbox-assembly/isaac_ros_docker
 docker build -t isaac_ros .
 
 chmod +x run.sh
@@ -180,7 +181,7 @@ source install/setup.bash
 ```bash
 python scripts/rule_based_agent.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
 
-python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
+python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --num_envs=1 --device cpu
 ```
 
 ```bash
