@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import math
 import torch
 from collections.abc import Sequence
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation, AssetBase, RigidObject
-from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import sample_uniform
 
@@ -18,10 +16,13 @@ from isaaclab.managers import SceneEntityCfg
 
 import isaacsim.core.utils.torch as torch_utils
 
-from Galaxea_Lab_External.robots import GalaxeaRulePolicy
+from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import Camera
 
+# from Galaxea_Lab_External.robots import GalaxeaRulePolicy
+
 from .planetary_gear_assembly_env_cfg import PlanetaryGearAssemblyEnvCfg
+from . import gearbox_assembly_utils
 from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
 from ....jensen_lovers_agent.finite_state_machine import StateMachine, Context, InitializationState
 
@@ -57,7 +58,7 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
         self.joint_pos = self.robot.data.joint_pos[:, self._joint_idx]
 
-        self.rule_policy = GalaxeaRulePolicy(sim_utils.SimulationContext.instance(), self.scene, self.obj_dict)
+        # self.rule_policy = GalaxeaRulePolicy(sim_utils.SimulationContext.instance(), self.scene, self.obj_dict)
         self.initial_root_state = None
 
         # ------------------------------------------------------
@@ -82,7 +83,8 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
         self.table = sim_utils.spawn_from_usd("/World/envs/env_.*/Table", self.cfg.table_cfg.spawn,
             translation=self.cfg.table_cfg.init_state.pos, 
-            orientation=self.cfg.table_cfg.init_state.rot)
+            orientation=self.cfg.table_cfg.init_state.rot
+        )
 
         self.ring_gear = RigidObject(self.cfg.ring_gear_cfg)
         self.sun_planetary_gear_1 = RigidObject(self.cfg.sun_planetary_gear_1_cfg)
@@ -111,13 +113,15 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=1000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
-        self.obj_dict = {"ring_gear": self.ring_gear,
-                        "planetary_carrier": self.planetary_carrier,
-                        "sun_planetary_gear_1": self.sun_planetary_gear_1,
-                        "sun_planetary_gear_2": self.sun_planetary_gear_2,
-                        "sun_planetary_gear_3": self.sun_planetary_gear_3,
-                        "sun_planetary_gear_4": self.sun_planetary_gear_4,
-                        "planetary_reducer": self.planetary_reducer}
+        self.obj_dict = {
+            "ring_gear": self.ring_gear,
+            "planetary_carrier": self.planetary_carrier,
+            "sun_planetary_gear_1": self.sun_planetary_gear_1,
+            "sun_planetary_gear_2": self.sun_planetary_gear_2,
+            "sun_planetary_gear_3": self.sun_planetary_gear_3,
+            "sun_planetary_gear_4": self.sun_planetary_gear_4,
+            "planetary_reducer": self.planetary_reducer
+        }
 
         self._initialize_scene()
 
@@ -126,43 +130,26 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # print(f"_pre_physics_step actions: {self.actions}")
 
     def _apply_action(self) -> None:
-        # ------------------------------------------------------
         self.context.fsm.update()
-        self.action, joint_ids = self.agent.joint_position_command, self.agent.joint_command_ids
-        # ------------------------------------------------------
-        if self.action is not None:
-            self.robot.set_joint_position_target(self.action, joint_ids=joint_ids)
+        
+        joint_command = self.agent.joint_position_command # (num_envs, n_joints)
+        joint_ids = self.agent.joint_command_ids
+        
+        if joint_command is not None:
+            self.robot.set_joint_position_target(
+                joint_command, 
+                joint_ids=joint_ids,
+                env_ids=self.robot._ALL_INDICES
+            )
 
-        # self.rule_policy.count += 1
         sim_dt = self.sim.get_physics_dt()
-        # print(f"Time: {self.rule_policy.count * sim_dt}")
-
         for obj_name, obj in self.obj_dict.items():
             obj.update(sim_dt)
 
-    def _get_observations(self) -> dict:
-        data_type = "rgb"
-        rgb = self.head_camera.data.output[data_type]
-        left_hand_rgb = self.left_hand_camera.data.output[data_type]
-        right_hand_rgb = self.right_hand_camera.data.output[data_type]
-
-        obs = torch.cat(
-            (
-                # rgb,
-                # left_hand_rgb,
-                # right_hand_rgb,
-                self.left_arm_joint_pos.unsqueeze(dim=1),
-                self.right_arm_joint_pos.unsqueeze(dim=1),
-                self.left_gripper_joint_pos.unsqueeze(dim=1),
-                self.right_gripper_joint_pos.unsqueeze(dim=1),
-            ),
-            dim=-1,
-        )
-            
-        observations = {"policy": obs}
-        return observations
-
     def get_key_points(self):
+        # Used member variables
+        num_envs = self.scene.num_envs
+
         # Pin positions
         # Calculate world positions of all pins
         planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()
@@ -171,10 +158,15 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         pin_world_positions = []
         pin_world_quats = []
         for pin_local_pos in self.pin_local_positions:
-            pin_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device)
+            pin_quat_batch = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs, 1)
+            pin_local_pos_batch = pin_local_pos.repeat(num_envs, 1)
 
             pin_world_quat, pin_world_pos = torch_utils.tf_combine(
-                planetary_carrier_quat, planetary_carrier_pos, pin_quat.unsqueeze(0), pin_local_pos.unsqueeze(0))
+                planetary_carrier_quat, 
+                planetary_carrier_pos, 
+                pin_quat_batch, 
+                pin_local_pos_batch
+            )
 
             pin_world_positions.append(pin_world_pos)
             pin_world_quats.append(pin_world_quat)
@@ -182,8 +174,12 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         gear_world_positions = []
         gear_world_quats = []
         
-        gear_names = ['sun_planetary_gear_1', 'sun_planetary_gear_2',
-                        'sun_planetary_gear_3', 'sun_planetary_gear_4']
+        gear_names = [
+            'sun_planetary_gear_1', 
+            'sun_planetary_gear_2',
+            'sun_planetary_gear_3', 
+            'sun_planetary_gear_4'
+        ]
         for gear_name in gear_names:
             gear_obj = self.obj_dict[gear_name]
             gear_pos = gear_obj.data.root_state_w[:, :3].clone()
@@ -205,72 +201,106 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
     def evaluate_score(self):
         pin_world_positions, pin_world_quats, gear_world_positions, gear_world_quats, planetary_carrier_pos, planetary_carrier_quat, ring_gear_world_pos, ring_gear_world_quat, reducer_world_pos, reducer_world_quat = self.get_key_points()
-        score = 0
+        score_batch = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
 
         for gear_idx in range(len(gear_world_positions)):
             gear_world_pos = gear_world_positions[gear_idx]
             gear_world_quat = gear_world_quats[gear_idx]
 
-            # print(f"gear_world_pos: {gear_world_pos}, gear_world_quat: {gear_world_quat}")
             # Search how many gears are mounted to the planetary carrier
-            num_mounted_gears = 0
             for pin_idx in range(len(pin_world_positions)):
                 pin_world_pos = pin_world_positions[pin_idx]
                 pin_world_quat = pin_world_quats[pin_idx]
-                # print(f"pin_world_pos: {pin_world_pos}")
-                # print(f"pin_world_quat: {pin_world_quat}")
-                distance = torch.norm(gear_world_pos[:, :2] - pin_world_pos[:, :2])
+
+                distance = torch.norm(gear_world_pos[:, :2] - pin_world_pos[:, :2], dim=1)
                 height_diff = gear_world_pos[:, 2] - pin_world_pos[:, 2]
+
                 # Evaluate the angle between gear_world_quat and pin_world_quat
-                angle = torch.acos(torch.dot(gear_world_quat.squeeze(0), pin_world_quat.squeeze(0)))
-                # print(f"distance: {distance}")
-                # print(f"angle: {angle}")
-                if distance < 0.002 and angle < 0.1 + 1 and height_diff < 0.012: # dismiss angle
-                    num_mounted_gears += 1
-            score += num_mounted_gears
+                dot_product = (gear_world_quat * pin_world_quat).sum(dim=-1)
+                angle = torch.acos(torch.clamp(dot_product, -1.0, 1.0))
+
+                # if distance < 0.002 and angle < 0.1 + 1 and height_diff < 0.012: # dismiss angle
+                #     num_mounted_gears += 1
+                mounted_mask = (distance < 0.002) & (angle < 1.1) & (height_diff < 0.012)
+                score_batch += mounted_mask.float()
+
+            # score += num_mounted_gears
 
         # Check whether the planetary carrier is mounted to the ring gear
-        distance = torch.norm(planetary_carrier_pos[:, :2] - ring_gear_world_pos[:, :2])
+        # distance = torch.norm(planetary_carrier_pos[:, :2] - ring_gear_world_pos[:, :2])
+        # height_diff = planetary_carrier_pos[:, 2] - ring_gear_world_pos[:, 2]
+        # angle = torch.acos(torch.dot(planetary_carrier_quat.squeeze(0), ring_gear_world_quat.squeeze(0)))
+        # if distance < 0.005 and angle < 0.1 and height_diff < 0.004:
+        #     score += 1
+
+        # Check whether the planetary carrier is mounted to the ring gear
+        distance = torch.norm(planetary_carrier_pos[:, :2] - ring_gear_world_pos[:, :2], dim=1)
         height_diff = planetary_carrier_pos[:, 2] - ring_gear_world_pos[:, 2]
-        angle = torch.acos(torch.dot(planetary_carrier_quat.squeeze(0), ring_gear_world_quat.squeeze(0)))
-        if distance < 0.005 and angle < 0.1 and height_diff < 0.004:
-            score += 1
 
-        # Check whehter the gear is mount in the middle
+        dot_product = (planetary_carrier_quat * ring_gear_world_quat).sum(dim=-1)
+        angle = torch.acos(torch.clamp(dot_product, -1.0, 1.0))
+        
+        carrier_on_ring_mask = (distance < 0.005) & (angle < 0.1) & (height_diff < 0.004)
+        score_batch += carrier_on_ring_mask.float() #
+
+        # # Check whehter the gear is mount in the middle
+        # for gear_idx in range(len(gear_world_positions)):
+        #     gear_world_pos = gear_world_positions[gear_idx]
+        #     gear_world_quat = gear_world_quats[gear_idx]
+        #     distance = torch.norm(gear_world_pos[:, :2] - ring_gear_world_pos[:, :2])
+        #     height_diff = gear_world_pos[:, 2] - ring_gear_world_pos[:, 2]
+        #     angle = torch.acos(torch.dot(gear_world_quat.squeeze(0), ring_gear_world_quat.squeeze(0)))
+        #     if distance < 0.005 and angle < 0.1 and height_diff < 0.004:
+        #         score += 1
+        # Check whether the gear is mount in the middle
         for gear_idx in range(len(gear_world_positions)):
-            gear_world_pos = gear_world_positions[gear_idx]
-            gear_world_quat = gear_world_quats[gear_idx]
-            distance = torch.norm(gear_world_pos[:, :2] - ring_gear_world_pos[:, :2])
-            height_diff = gear_world_pos[:, 2] - ring_gear_world_pos[:, 2]
-            angle = torch.acos(torch.dot(gear_world_quat.squeeze(0), ring_gear_world_quat.squeeze(0)))
-            if distance < 0.005 and angle < 0.1 and height_diff < 0.004:
-                score += 1
+            gear_pos = gear_world_positions[gear_idx]
+            gear_quat = gear_world_quats[gear_idx]
+            
+            distance = torch.norm(gear_pos[:, :2] - ring_gear_world_pos[:, :2], dim=1)
+            height_diff = gear_pos[:, 2] - ring_gear_world_pos[:, 2]
+            dot_product = (gear_quat * ring_gear_world_quat).sum(dim=-1)
+            angle = torch.acos(torch.clamp(dot_product, -1.0, 1.0))
+            
+            sun_gear_mask = (distance < 0.005) & (angle < 0.1) & (height_diff < 0.004)
+            score_batch += sun_gear_mask.float()
 
+        # # Check whether the reducer is mounted to the gear
+        # for gear_idx in range(len(gear_world_positions)):
+        #     gear_world_pos = gear_world_positions[gear_idx]
+        #     gear_world_quat = gear_world_quats[gear_idx]
+        #     distance = torch.norm(gear_world_pos[:, :2] - reducer_world_pos[:, :2])
+        #     height_diff = gear_world_pos[:, 2] - reducer_world_pos[:, 2]
+        #     angle = torch.acos(torch.dot(gear_world_quat.squeeze(0), reducer_world_quat.squeeze(0)))
+        #     if distance < 0.005 and angle < 0.1 and height_diff < 0.002:
+        #         score += 1
         # Check whether the reducer is mounted to the gear
         for gear_idx in range(len(gear_world_positions)):
-            gear_world_pos = gear_world_positions[gear_idx]
-            gear_world_quat = gear_world_quats[gear_idx]
-            distance = torch.norm(gear_world_pos[:, :2] - reducer_world_pos[:, :2])
-            height_diff = gear_world_pos[:, 2] - reducer_world_pos[:, 2]
-            angle = torch.acos(torch.dot(gear_world_quat.squeeze(0), reducer_world_quat.squeeze(0)))
-            if distance < 0.005 and angle < 0.1 and height_diff < 0.002:
-                score += 1
+            gear_pos = gear_world_positions[gear_idx]
+            gear_quat = gear_world_quats[gear_idx]
+            
+            distance = torch.norm(gear_pos[:, :2] - reducer_world_pos[:, :2], dim=1)
+            height_diff = gear_pos[:, 2] - reducer_world_pos[:, 2]
+            dot_product = (gear_quat * reducer_world_quat).sum(dim=-1)
+            angle = torch.acos(torch.clamp(dot_product, -1.0, 1.0))
+            
+            reducer_mask = (distance < 0.005) & (angle < 0.1) & (height_diff < 0.002)
+            score_batch += reducer_mask.float()
 
         # time_cost = self.rule_policy.count * self.sim.get_physics_dt()
         time_cost = 0
 
-        return score, time_cost
+        return score_batch, time_cost
 
     def _get_rewards(self) -> torch.Tensor:
-        score, time_cost = self.evaluate_score()
-        print(f"score: {score}")
-        reward_tensor = torch.full((self.num_envs,), score, device=self.device, dtype=torch.float32)
+        scores_batch, _ = self.evaluate_score()
+        reward_tensor = scores_batch.clone()
 
         return reward_tensor
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        score, _ = self.evaluate_score()
-        finish_task = torch.tensor(score >= 1, device=self.device)
+        score_batch, _ = self.evaluate_score()
+        finish_task = score_batch >= 3.0
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         return finish_task, time_out
 
@@ -419,7 +449,9 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
                     if is_valid:
                         # Position is valid, use it
-                        root_state[env_idx, :3] = pos
+                        world_pos = pos + self.scene.env_origins[env_idx]
+                        root_state[env_idx, :3] = world_pos
+                        
                         placed_objects[env_idx].append((pos, obj_name))
                         position_found = True
                         break
@@ -429,7 +461,9 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
                     print(f"[WARN] Could not find non-overlapping position for {obj_name} in env {env_idx} after {max_attempts} attempts.")
                     print(f"       This may indicate the table area is too crowded. Consider reducing the number of objects")
                     print(f"       or increasing the table area (x: [0.2, 0.5], y: [-0.3, 0.3]).")
-                    root_state[env_idx, :3] = pos
+                    world_pos = pos + self.scene.env_origins[env_idx]
+                    root_state[env_idx, :3] = world_pos
+                    
                     placed_objects[env_idx].append((pos, obj_name))
 
             # Write the state to simulation
@@ -438,21 +472,20 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
         return initial_root_state
 
-
-
-
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
 
-        self.initial_root_state = self._randomize_object_positions([self.ring_gear, self.planetary_carrier,
-                                        self.sun_planetary_gear_1, self.sun_planetary_gear_2,
-                                        self.sun_planetary_gear_3, self.sun_planetary_gear_4,
-                                        self.planetary_reducer], ['ring_gear', 'planetary_carrier',
-                                        'sun_planetary_gear_1', 'sun_planetary_gear_2',
-                                        'sun_planetary_gear_3', 'sun_planetary_gear_4',
-                                        'planetary_reducer'])
+        self.initial_root_state = self._randomize_object_positions([
+            self.ring_gear, self.planetary_carrier,
+            self.sun_planetary_gear_1, self.sun_planetary_gear_2,
+            self.sun_planetary_gear_3, self.sun_planetary_gear_4,
+            self.planetary_reducer], ['ring_gear', 'planetary_carrier',
+            'sun_planetary_gear_1', 'sun_planetary_gear_2',
+            'sun_planetary_gear_3', 'sun_planetary_gear_4',
+            'planetary_reducer'
+        ])
 
         # self.rule_policy.set_initial_root_state(self.initial_root_state)
         # self.rule_policy.prepare_mounting_plan()
@@ -489,5 +522,147 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
         # self.robot.write_joint_position_to_sim(torch.tensor([28.6479 / 180.0 * math.pi, -45.8366 / 180.0 * math.pi, 28.6479 / 180.0 * math.pi], device=self.device), self._torso_joint_idx, env_ids)
 
-        
+    # ----------------------------------------------------------------------------------------------------
 
+    # def _get_factory_obs_state_dict(self):
+    #     """Populate dictionaries for the policy and critic."""
+    #     noisy_fixed_pos = self.fixed_pos_obs_frame + self.init_fixed_pos_obs_noise
+
+    #     prev_actions = self.actions.clone()
+
+    #     obs_dict = {
+    #         "fingertip_pos": self.fingertip_midpoint_pos,
+    #         "fingertip_pos_rel_fixed": self.fingertip_midpoint_pos - noisy_fixed_pos,
+    #         "fingertip_quat": self.fingertip_midpoint_quat,
+    #         "ee_linvel": self.ee_linvel_fd,
+    #         "ee_angvel": self.ee_angvel_fd,
+    #         "prev_actions": prev_actions,
+    #     }
+
+    #     state_dict = {
+    #         "fingertip_pos": self.fingertip_midpoint_pos,
+    #         "fingertip_pos_rel_fixed": self.fingertip_midpoint_pos - self.fixed_pos_obs_frame,
+    #         "fingertip_quat": self.fingertip_midpoint_quat,
+    #         "ee_linvel": self.fingertip_midpoint_linvel,
+    #         "ee_angvel": self.fingertip_midpoint_angvel,
+    #         "joint_pos": self.joint_pos[:, 0:7],
+    #         "held_pos": self.held_pos,
+    #         "held_pos_rel_fixed": self.held_pos - self.fixed_pos_obs_frame,
+    #         "held_quat": self.held_quat,
+    #         "fixed_pos": self.fixed_pos,
+    #         "fixed_quat": self.fixed_quat,
+    #         "task_prop_gains": self.task_prop_gains,
+    #         "pos_threshold": self.pos_threshold,
+    #         "rot_threshold": self.rot_threshold,
+    #         "prev_actions": prev_actions,
+    #     }
+    #     return obs_dict, state_dict
+
+#    def _get_observations(self):
+#        """Get actor/critic inputs using asymmetric critic."""
+#        obs_dict, state_dict = self._get_factory_obs_state_dict()
+
+#        obs_tensors = factory_utils.collapse_obs_dict(obs_dict, self.cfg.obs_order + ["prev_actions"])
+#        state_tensors = factory_utils.collapse_obs_dict(state_dict, self.cfg.state_order + ["prev_actions"])
+#        return {"policy": obs_tensors, "critic": state_tensors}
+
+    def _get_obs_state_dict(self):
+        """Populate dictionaries for the policy and critic."""
+        obs_dict = {
+            "fingertip_pos": 1,
+            "fingertip_pos_rel_fixed": 2,
+            "fingertip_quat": 3,
+            "ee_linvel": 4,
+            "ee_angvel": 5,
+            "prev_actions": 6
+        }
+        state_dict = {
+            "fingertip_pos": 1,
+            "fingertip_pos_rel, fixed": 2,
+            "fingertip_quat": 3,
+            "ee_linvel": 4,
+            "ee_angvel": 5,
+            "joint_ps": 6,
+            "held_pos": 7,
+            "held_pos_rel_fixed": 8,
+            "held_quat": 9,
+            "fixed_pos": 10,
+            "fixed_quat": 11,
+            "task_prop_gains": 12,
+            "pos_threshold": 13,
+            "rot_threshold": 14,
+            "prev_actions": 15
+        }
+        return obs_dict, state_dict
+
+    def _get_observations(self) -> dict:
+        """Get actor/critic inputs using asymmetric critic."""
+        obs_dict, state_dict = self._get_obs_state_dict()
+        # obs_tensors = gearbox_assembly_utils.collapse_obs_dict(
+        #    obs_dict=obs_dict,
+        #    obs_order=self.cfg.obs_order + ["prev_actions"]
+        #)
+        #state_tensors = gearbox_assembly_utils.collapse_obs_dict(
+        #    obs_dict=state_dict,
+        #    obs_order=self.cfg.state_order + ["prev_actions"]
+        #)
+
+        # tempt keep for debugging
+        obs_tensors = torch.cat(
+            (
+                self.left_arm_joint_pos,
+                self.right_arm_joint_pos,
+                self.left_gripper_joint_pos,
+                self.right_gripper_joint_pos
+            ),
+            dim=-1,
+        )
+            
+        observations = {"policy": obs_tensors}
+        return observations
+
+    def _compute_intermediate_values(self):
+        # End Effector's values
+        pass
+
+    # def _compute_intermediate_values(self, dt):
+    #     """Get values computed from raw tensors. This includes adding noise."""
+
+    #     self.fixed_pos = self._fixed_asset.data.root_pos_w - self.scene.env_origins
+    #     self.fixed_quat = self._fixed_asset.data.root_quat_w
+
+    #     self.held_pos = self._held_asset.data.root_pos_w - self.scene.env_origins
+    #     self.held_quat = self._held_asset.data.root_quat_w
+
+    #     self.fingertip_midpoint_pos = self._robot.data.body_pos_w[:, self.fingertip_body_idx] - self.scene.env_origins
+    #     self.fingertip_midpoint_quat = self._robot.data.body_quat_w[:, self.fingertip_body_idx]
+    #     self.fingertip_midpoint_linvel = self._robot.data.body_lin_vel_w[:, self.fingertip_body_idx]
+    #     self.fingertip_midpoint_angvel = self._robot.data.body_ang_vel_w[:, self.fingertip_body_idx]
+
+    #     jacobians = self._robot.root_physx_view.get_jacobians()
+
+    #     self.left_finger_jacobian = jacobians[:, self.left_finger_body_idx - 1, 0:6, 0:7]
+    #     self.right_finger_jacobian = jacobians[:, self.right_finger_body_idx - 1, 0:6, 0:7]
+    #     self.fingertip_midpoint_jacobian = (self.left_finger_jacobian + self.right_finger_jacobian) * 0.5
+    #     self.arm_mass_matrix = self._robot.root_physx_view.get_generalized_mass_matrices()[:, 0:7, 0:7]
+    #     self.joint_pos = self._robot.data.joint_pos.clone()
+    #     self.joint_vel = self._robot.data.joint_vel.clone()
+
+    #     # Finite-differencing results in more reliable velocity estimates.
+    #     self.ee_linvel_fd = (self.fingertip_midpoint_pos - self.prev_fingertip_pos) / dt
+    #     self.prev_fingertip_pos = self.fingertip_midpoint_pos.clone()
+
+    #     # Add state differences if velocity isn't being added.
+    #     rot_diff_quat = torch_utils.quat_mul(
+    #         self.fingertip_midpoint_quat, torch_utils.quat_conjugate(self.prev_fingertip_quat)
+    #     )
+    #     rot_diff_quat *= torch.sign(rot_diff_quat[:, 0]).unsqueeze(-1)
+    #     rot_diff_aa = axis_angle_from_quat(rot_diff_quat)
+    #     self.ee_angvel_fd = rot_diff_aa / dt
+    #     self.prev_fingertip_quat = self.fingertip_midpoint_quat.clone()
+
+    #     joint_diff = self.joint_pos[:, 0:7] - self.prev_joint_pos
+    #     self.joint_vel_fd = joint_diff / dt
+    #     self.prev_joint_pos = self.joint_pos[:, 0:7].clone()
+
+    #     self.last_update_timestamp = self._robot._data._sim_timestamp

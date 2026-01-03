@@ -5,6 +5,32 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 from isaaclab.sensors import CameraCfg
 
+OBS_DIM_CFG = {
+    "fingertip_pos": 3,
+    "fingertip_pos_rel_fixed": 3,
+    "fingertip_quat": 4,
+    "ee_linvel": 3,
+    "ee_angvel": 3,
+}
+
+STATE_DIM_CFG = {
+    "fingertip_pos": 3,
+    "fingertip_pos_rel_fixed": 3,
+    "fingertip_quat": 4,
+    "ee_linvel": 3,
+    "ee_angvel": 3,
+    "joint_pos": 7,
+    "held_pos": 3,
+    "held_pos_rel_fixed": 3,
+    "held_quat": 4,
+    "fixed_pos": 3,
+    "fixed_quat": 4,
+    "task_prop_gains": 6,
+    "ema_factor": 1,
+    "pos_threshold": 3,
+    "rot_threshold": 3,
+}
+
 from Galaxea_Lab_External.robots import (
     GALAXEA_R1_CHALLENGE_CFG,
     GALAXEA_HEAD_CAMERA_CFG,
@@ -24,14 +50,34 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
 
     # env
     sim_dt = 0.01
-    decimation = 2 # 5
+    decimation = 2
     episode_length_s = 60.0
 
     # spaces definition
     action_space = 14
-    observation_space = 14
+    observation_space = 16
     state_space = 0
     num_rerenders_on_reset = 5
+
+    obs_order: list = [
+        "fingertip_pos_rel_fixed", 
+        "fingertip_quat", 
+        "ee_linvel", 
+        "ee_angvel"
+    ]
+    state_order: list = [
+        "fingertip_pos",
+        "fingertip_quat",
+        "ee_linvel",
+        "ee_angvel",
+        "joint_pos",
+        "held_pos",
+        "held_pos_rel_fixed",
+        "held_quat",
+        "fixed_pos",
+        "fixed_quat",
+    ]
+
 
     # simulation
     sim: SimulationCfg = SimulationCfg(dt=sim_dt, render_interval=decimation)
@@ -88,7 +134,6 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
         prim_path="/World/envs/env_.*/planetary_reducer",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=(0.3, 0.1, 1.0),
-        #    rot=(0.7071068 , 0.0, 0.0, 0.7071068),
             rot=(1.0, 0.0, 0.0, 0.0),
         )
     )
