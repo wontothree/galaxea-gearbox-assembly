@@ -49,14 +49,6 @@ cd /workspace/isaaclab/source/gearboxAssembly
 python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
 ```
 
-This project is tested in the environment of Docker and Window 11.
-
-## Training
-
-```bash
-python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
-```
-
 ## Getting Started
 
 ### [Docker Image 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
@@ -182,5 +174,19 @@ cd ${ISAAC_ROS_WS} && \
 source ${ISAAC_ROS_WS}/install/setup.bash
 source install/setup.bash
 ```
+
+## Train
+
+```bash
+python scripts/rule_based_agent.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
+
+python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
+```
+
+```bash
+python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
+```
+
+This project is tested in the environment of Docker and Window 11.
 
 ---
