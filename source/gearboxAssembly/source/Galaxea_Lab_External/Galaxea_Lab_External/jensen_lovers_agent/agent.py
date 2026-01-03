@@ -35,7 +35,6 @@ class GalaxeaGearboxAssemblyAgent:
         self.device = sim.device
         self.scene = scene
         self.robot = scene["robot"]
-        self.num_envs = self.scene.num_envs
 
         # Object state
         self.obj_dict = obj_dict
@@ -54,12 +53,6 @@ class GalaxeaGearboxAssemblyAgent:
             torch.tensor([-0.0465, 0.0268, 0.0], device=self.device),  # pin_2
         ]
 
-        # Initial target pose and orientation
-        self.initial_left_ee_pos_w = torch.tensor([[0.3864, 0.5237, 1.1475]], device=self.device)
-        self.initial_left_ee_quat_w = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
-        self.initial_right_ee_pos_w = torch.tensor([[0.3864, -0.5237, 1.1475]], device=self.device)
-        self.initial_right_ee_quat_w = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
-
         # Initialize arm controller
         self.left_diff_ik_controller, self.left_arm_entity_cfg, self.left_gripper_entity_cfg = self.initialize_arm_controller("left")
         self.right_diff_ik_controller, self.right_arm_entity_cfg, self.right_gripper_entity_cfg = self.initialize_arm_controller("right")
@@ -68,7 +61,9 @@ class GalaxeaGearboxAssemblyAgent:
         self.joint_position_command = None
         self.joint_command_ids = None
 
-        # [Function] observe_robot_state
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [Function] observe_robot_state ------------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
         self.left_ee_pos_w = None
         self.left_ee_quat_w = None
         self.right_ee_pos_w = None
@@ -77,7 +72,9 @@ class GalaxeaGearboxAssemblyAgent:
         self.base_quat_w = None
         self.current_left_gripper_state = None
 
-        # [Function] observe_object_state
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [Function] observe_object_state ------------------------------------------------------------------------------------------ #
+        # -------------------------------------------------------------------------------------------------------------------------- #
         self.sun_planetary_gear_positions = []
         self.sun_planetary_gear_quats = []
         self.planetary_carrier_pos = None
@@ -89,7 +86,9 @@ class GalaxeaGearboxAssemblyAgent:
         self.pin_positions = []
         self.pin_quats = []
 
-        # [Function] observe_assembly_state
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [Function] observe_assembly_state ---------------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
         self.mounting_thresholds = { # relaxed
             "planetary_gear": {
                 "horizontal": 0.002 + 0.008,
@@ -120,7 +119,18 @@ class GalaxeaGearboxAssemblyAgent:
         self.unmounted_sun_planetary_gear_quats = []
         self.unmounted_pin_positions = []
 
-        # [Function] pick_and_place
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [Function] pick_and_place ------------------------------------------------------------------------------------------------ #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        self.initial_left_ee_pos_e         = torch.tensor([[0.3864, 0.5237, 1.1475]], device=self.device) - self.scene.env_origins
+        self.initial_left_ee_quat_w        = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
+        self.initial_right_ee_pos_e        = torch.tensor([[0.3864, -0.5237, 1.1475]], device=self.device) - self.scene.env_origins
+        self.initial_right_ee_quat_w       = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
+        self.initial_left_ee_pos_e_batch   = self.initial_left_ee_pos_e.repeat(self.scene.num_envs, 1)
+        self.initial_left_ee_quat_w_batch  = self.initial_left_ee_quat_w.repeat(self.scene.num_envs, 1)
+        self.initial_right_ee_pos_e_batch  = self.initial_right_ee_pos_e.repeat(self.scene.num_envs, 1)
+        self.initial_right_ee_quat_w_batch = self.initial_right_ee_quat_w.repeat(self.scene.num_envs, 1)
+
         self.TCP_offset_z = 1.1475 - 1.05661
         self.TCP_offset_x = 0.3864 - 0.3785
         self.table_height = 0.9
@@ -128,13 +138,13 @@ class GalaxeaGearboxAssemblyAgent:
         self.pick_and_place_fsm_state = PickAndPlaceState.INITIALIZATION
         self.pick_and_place_fsm_timer = 0
         self.pick_and_place_fsm_states = torch.full(
-            (self.num_envs,), 
+            (self.scene.num_envs,), 
             PickAndPlaceState.INITIALIZATION.value, 
             dtype=torch.long, 
             device=self.device
         )
         self.pick_and_place_fsm_timers = torch.zeros(
-            self.num_envs, 
+            self.scene.num_envs, 
             dtype=torch.long, 
             device=self.device
         )
@@ -146,29 +156,17 @@ class GalaxeaGearboxAssemblyAgent:
         """
         update robot state: simulation ground truth
         """
+        # Used member variables
+        num_envs = self.scene.num_envs
+        env_origins = self.scene.env_origins
+
         # end effector (simulation ground truth)
-        left_arm_body_ids = self.left_arm_entity_cfg.body_ids
-        right_arm_body_ids = self.right_arm_entity_cfg.body_ids
-        self.left_ee_pos_w = self.robot.data.body_state_w[          
-            :,
-            left_arm_body_ids[0],
-            0:3
-        ]
-        self.left_ee_quat_w = self.robot.data.body_state_w[
-            :,
-            left_arm_body_ids[0],
-            3:7
-        ]
-        self.right_ee_pos_w = self.robot.data.body_state_w[        
-            :,
-            right_arm_body_ids[0],
-            0:3
-        ]
-        self.right_ee_quat_w = self.robot.data.body_state_w[
-            :,
-            right_arm_body_ids[0],
-            3:7
-        ]
+        left_arm_body_ids    = self.left_arm_entity_cfg.body_ids
+        right_arm_body_ids   = self.right_arm_entity_cfg.body_ids
+        self.left_ee_pos_w   = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
+        self.left_ee_quat_w  = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
+        self.right_ee_pos_w  = self.robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
+        self.right_ee_quat_w = self.robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
 
         # Base
         self.base_pos_w  = self.robot.data.root_state_w[:, 0:3]
@@ -183,7 +181,7 @@ class GalaxeaGearboxAssemblyAgent:
         update object state: simulation ground truth
         """
         # Used member variables
-        num_envs = self.num_envs
+        num_envs = self.scene.num_envs
 
         # Sun planetary gears
         self.sun_planetary_gear_positions = []
@@ -246,7 +244,7 @@ class GalaxeaGearboxAssemblyAgent:
         ring_gear_quat = self.ring_gear_quat
         planetary_reducer_pos = self.planetary_reducer_pos
         planetary_reducer_quat = self.planetary_reducer_quat
-        num_envs = self.num_envs
+        num_envs = self.scene.num_envs
 
         # initialize
         self.num_mounted_planetary_gears = 0
@@ -390,7 +388,7 @@ class GalaxeaGearboxAssemblyAgent:
         )
         differential_inverse_kinematics_controller = DifferentialIKController(
             differential_inverse_kinematics_cfg,
-            num_envs=self.num_envs,                   # number of parallel environment in Isaac Sim, vectorizated simulation
+            num_envs=self.scene.num_envs,                   # number of parallel environment in Isaac Sim, vectorizated simulation
             device=self.device                        # "cuda": gpu / "cpu": cpu
         )
 
@@ -492,18 +490,18 @@ class GalaxeaGearboxAssemblyAgent:
         self.observe_assembly_state()
 
         # Used member variables
-        num_envs = self.num_envs
+        num_envs = self.scene.num_envs
         unmounted_sun_planetary_gear_positions = self.unmounted_sun_planetary_gear_positions
         unmounted_sun_planetary_gear_quats = self.unmounted_sun_planetary_gear_quats
         unmounted_pin_positions = self.unmounted_pin_positions
-        initial_left_ee_pos_w = self.initial_left_ee_pos_w
+        initial_left_ee_pos_e = self.initial_left_ee_pos_e
         initial_left_ee_quat_w = self.initial_left_ee_quat_w
-        initial_right_ee_pos_w = self.initial_right_ee_pos_w
+        initial_right_ee_pos_e = self.initial_right_ee_pos_e
         initial_right_ee_quat_w = self.initial_right_ee_quat_w
-        initial_left_ee_pos_w_batch = self.initial_left_ee_pos_w.repeat(num_envs, 1)
-        initial_left_ee_quat_w_batch = self.initial_left_ee_quat_w.repeat(num_envs, 1)
-        initial_right_ee_pos_w_batch = self.initial_right_ee_pos_w.repeat(num_envs, 1)
-        initial_right_ee_quat_w_batch = self.initial_right_ee_quat_w.repeat(num_envs, 1)
+        initial_left_ee_pos_e_batch = self.initial_left_ee_pos_e_batch
+        initial_left_ee_quat_w_batch = self.initial_left_ee_quat_w_batch
+        initial_right_ee_pos_e_batch = self.initial_right_ee_pos_e_batch
+        initial_right_ee_quat_w_batch = self.initial_right_ee_quat_w_batch
         base_pos_w = self.base_pos_w
         base_quat_w = self.base_quat_w
 
@@ -594,13 +592,13 @@ class GalaxeaGearboxAssemblyAgent:
             initial_left_ee_pos_b, initial_left_ee_quat_b = subtract_frame_transforms(
                 base_pos_w,
                 base_quat_w,
-                initial_left_ee_pos_w_batch,
+                initial_left_ee_pos_e_batch,
                 initial_left_ee_quat_w_batch
             )
             initial_right_ee_pos_b, initial_right_ee_quat_b = subtract_frame_transforms(
                 base_pos_w,
                 base_quat_w,
-                initial_right_ee_pos_w_batch,
+                initial_right_ee_pos_e_batch,
                 initial_right_ee_quat_w_batch   
             )
             desired_left_joint_position, desired_left_joint_ids = self.solve_inverse_kinematics( 
@@ -632,8 +630,8 @@ class GalaxeaGearboxAssemblyAgent:
             )
 
             # Decide arm and gripper configuration
-            dist_left = torch.norm(target_pick_pos_w - initial_left_ee_pos_w)
-            dist_right = torch.norm(target_pick_pos_w - initial_right_ee_pos_w)
+            dist_left = torch.norm(target_pick_pos_w - initial_left_ee_pos_e)
+            dist_right = torch.norm(target_pick_pos_w - initial_right_ee_pos_e)
             if dist_left <= dist_right:
                 self.active_arm_name = "left"
                 self.active_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
