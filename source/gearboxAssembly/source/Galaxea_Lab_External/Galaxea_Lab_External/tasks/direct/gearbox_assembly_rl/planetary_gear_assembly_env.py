@@ -19,6 +19,8 @@ import isaacsim.core.utils.torch as torch_utils
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import Camera
 
+from isaaclab.managers import SceneEntityCfg
+
 # from Galaxea_Lab_External.robots import GalaxeaRulePolicy
 
 from .planetary_gear_assembly_env_cfg import PlanetaryGearAssemblyEnvCfg
@@ -61,6 +63,27 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # self.rule_policy = GalaxeaRulePolicy(sim_utils.SimulationContext.instance(), self.scene, self.obj_dict)
         self.initial_root_state = None
 
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # [Function] _compute_intermediate_values ---------------------------------------------------------------------------------- #
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        self.left_ee_pos_e       = None
+        self.left_ee_quat_w      = None
+        self.left_ee_linvel_w    = None
+        self.left_ee_angvel_w    = None
+        self.right_ee_pos_e      = None
+        self.right_ee_quat_w     = None
+        self.right_ee_linvel_w   = None
+        self.right_ee_angvel_w   = None
+        # self.left_arm_joint_pos  = None
+        # self.right_arm_joint_pos = None
+                
+
+
+
+
+
+
+
         # ------------------------------------------------------
         self.agent = GalaxeaGearboxAssemblyAgent(
             sim=sim_utils.SimulationContext.instance(),
@@ -72,6 +95,20 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         fsm = StateMachine(initial_state, self.context)
         self.context.fsm = fsm
         # ------------------------------------------------------
+		
+        self.left_arm_entity_cfg = SceneEntityCfg(
+            "robot",                            # robot entity name
+            joint_names=["left_arm_joint.*"],   # joint entity set
+            body_names=["left_arm_link6"]       # body entity set`
+		)
+        self.right_arm_entity_cfg = SceneEntityCfg(
+				"robot",
+				joint_names=["right_arm_joint.*"],
+				body_names=["right_arm_link6"]
+		)
+        self.left_arm_entity_cfg.resolve(self.scene) # Resolving the scene entities
+        self.right_arm_entity_cfg.resolve(self.scene)
+
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -524,50 +561,74 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
     # ----------------------------------------------------------------------------------------------------
 
-    # def _get_factory_obs_state_dict(self):
-    #     """Populate dictionaries for the policy and critic."""
-    #     noisy_fixed_pos = self.fixed_pos_obs_frame + self.init_fixed_pos_obs_noise
+    def _compute_intermediate_values(self):
+        # Simulation ground truth data
+        # Used member variables
+        num_envs = self.scene.num_envs
+        env_origins = self.scene.env_origins
+        
+        # Robot states
+        left_arm_body_ids        = self.left_arm_entity_cfg.body_ids
+        left_arm_joint_ids       = self.left_arm_entity_cfg.joint_ids
+        right_arm_body_ids       = self.right_arm_entity_cfg.body_ids
+        right_arm_joint_ids      = self.right_arm_entity_cfg.joint_ids
 
-    #     prev_actions = self.actions.clone()
+        self.left_ee_pos_e       = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
+        self.left_ee_quat_w      = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
+        self.left_ee_linvel_w    = self.robot.data.body_state_w[:, left_arm_body_ids[0], 7:10]
+        self.left_ee_angvel_w    = self.robot.data.body_state_w[:, left_arm_body_ids[0], 10:13]
+        self.right_ee_pos_e      = self.robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
+        self.right_ee_quat_w     = self.robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
+        self.right_ee_linvel_w   = self.robot.data.body_state_w[:, right_arm_body_ids[0], 7:10]
+        self.right_ee_angvel_w   = self.robot.data.body_state_w[:, right_arm_body_ids[0], 10:13]
 
-    #     obs_dict = {
-    #         "fingertip_pos": self.fingertip_midpoint_pos,
-    #         "fingertip_pos_rel_fixed": self.fingertip_midpoint_pos - noisy_fixed_pos,
-    #         "fingertip_quat": self.fingertip_midpoint_quat,
-    #         "ee_linvel": self.ee_linvel_fd,
-    #         "ee_angvel": self.ee_angvel_fd,
-    #         "prev_actions": prev_actions,
-    #     }
+        self.left_arm_joint_pos  = self.robot.data.joint_pos[:, left_arm_joint_ids]
+        self.right_arm_joint_pos = self.robot.data.joint_pos[:, right_arm_joint_ids]
 
-    #     state_dict = {
-    #         "fingertip_pos": self.fingertip_midpoint_pos,
-    #         "fingertip_pos_rel_fixed": self.fingertip_midpoint_pos - self.fixed_pos_obs_frame,
-    #         "fingertip_quat": self.fingertip_midpoint_quat,
-    #         "ee_linvel": self.fingertip_midpoint_linvel,
-    #         "ee_angvel": self.fingertip_midpoint_angvel,
-    #         "joint_pos": self.joint_pos[:, 0:7],
-    #         "held_pos": self.held_pos,
-    #         "held_pos_rel_fixed": self.held_pos - self.fixed_pos_obs_frame,
-    #         "held_quat": self.held_quat,
-    #         "fixed_pos": self.fixed_pos,
-    #         "fixed_quat": self.fixed_quat,
-    #         "task_prop_gains": self.task_prop_gains,
-    #         "pos_threshold": self.pos_threshold,
-    #         "rot_threshold": self.rot_threshold,
-    #         "prev_actions": prev_actions,
-    #     }
-    #     return obs_dict, state_dict
+        # Object states
+        # Planetary gear
+        self.sun_planetary_gear_positions_e = []
+        self.sun_planetary_gear_quats_w = []
+        sun_planetary_gear_names = [
+                'sun_planetary_gear_1', 
+                'sun_planetary_gear_2', 
+                'sun_planetary_gear_3', 
+                'sun_planetary_gear_4'
+            ]
+        for sun_planetary_gear_name in sun_planetary_gear_names:
+            gear_obj = self.obj_dict[sun_planetary_gear_name]
+            gear_pos_e = gear_obj.data.root_state_w[:, :3].clone() - env_origins
+            gear_quat_w = gear_obj.data.root_state_w[:, 3:7].clone()
 
-#    def _get_observations(self):
-#        """Get actor/critic inputs using asymmetric critic."""
-#        obs_dict, state_dict = self._get_factory_obs_state_dict()
+            self.sun_planetary_gear_positions_e.append(gear_pos_e)
+            self.sun_planetary_gear_quats_w.append(gear_quat_w)
+        
+        # Planetary carrier
+        planetary_carrier_pos_w  = self.planetary_carrier.data.root_state_w[:, :3].clone()
+        planetary_carrier_quat_w = self.planetary_carrier.data.root_state_w[:, 3:7].clone()
 
-#        obs_tensors = factory_utils.collapse_obs_dict(obs_dict, self.cfg.obs_order + ["prev_actions"])
-#        state_tensors = factory_utils.collapse_obs_dict(state_dict, self.cfg.state_order + ["prev_actions"])
-#        return {"policy": obs_tensors, "critic": state_tensors}
+        # Pin in planetary carrier
+        self.pin_positions_e = []
+        self.pin_quats_w = []
+        for pin_local_pos in self.pin_local_positions:
+            pin_quat_repeated = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs, 1)
+            pin_local_pos_repeated = pin_local_pos.repeat(num_envs, 1)
+
+            pin_quat, pin_pos = torch_utils.tf_combine(
+                planetary_carrier_quat_w, 
+                planetary_carrier_pos_w, 
+                pin_quat_repeated, 
+                pin_local_pos_repeated
+            )
+
+            self.pin_positions_e.append(pin_pos - env_origins)
+            self.pin_quats_w.append(pin_quat)
 
     def _get_obs_state_dict(self):
         """Populate dictionaries for the policy and critic."""
+        # Used member variables
+        prev_actions = None
+
         obs_dict = {
             "fingertip_pos": 1,
             "fingertip_pos_rel_fixed": 2,
@@ -620,49 +681,3 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
             
         observations = {"policy": obs_tensors}
         return observations
-
-    def _compute_intermediate_values(self):
-        # End Effector's values
-        pass
-
-    # def _compute_intermediate_values(self, dt):
-    #     """Get values computed from raw tensors. This includes adding noise."""
-
-    #     self.fixed_pos = self._fixed_asset.data.root_pos_w - self.scene.env_origins
-    #     self.fixed_quat = self._fixed_asset.data.root_quat_w
-
-    #     self.held_pos = self._held_asset.data.root_pos_w - self.scene.env_origins
-    #     self.held_quat = self._held_asset.data.root_quat_w
-
-    #     self.fingertip_midpoint_pos = self._robot.data.body_pos_w[:, self.fingertip_body_idx] - self.scene.env_origins
-    #     self.fingertip_midpoint_quat = self._robot.data.body_quat_w[:, self.fingertip_body_idx]
-    #     self.fingertip_midpoint_linvel = self._robot.data.body_lin_vel_w[:, self.fingertip_body_idx]
-    #     self.fingertip_midpoint_angvel = self._robot.data.body_ang_vel_w[:, self.fingertip_body_idx]
-
-    #     jacobians = self._robot.root_physx_view.get_jacobians()
-
-    #     self.left_finger_jacobian = jacobians[:, self.left_finger_body_idx - 1, 0:6, 0:7]
-    #     self.right_finger_jacobian = jacobians[:, self.right_finger_body_idx - 1, 0:6, 0:7]
-    #     self.fingertip_midpoint_jacobian = (self.left_finger_jacobian + self.right_finger_jacobian) * 0.5
-    #     self.arm_mass_matrix = self._robot.root_physx_view.get_generalized_mass_matrices()[:, 0:7, 0:7]
-    #     self.joint_pos = self._robot.data.joint_pos.clone()
-    #     self.joint_vel = self._robot.data.joint_vel.clone()
-
-    #     # Finite-differencing results in more reliable velocity estimates.
-    #     self.ee_linvel_fd = (self.fingertip_midpoint_pos - self.prev_fingertip_pos) / dt
-    #     self.prev_fingertip_pos = self.fingertip_midpoint_pos.clone()
-
-    #     # Add state differences if velocity isn't being added.
-    #     rot_diff_quat = torch_utils.quat_mul(
-    #         self.fingertip_midpoint_quat, torch_utils.quat_conjugate(self.prev_fingertip_quat)
-    #     )
-    #     rot_diff_quat *= torch.sign(rot_diff_quat[:, 0]).unsqueeze(-1)
-    #     rot_diff_aa = axis_angle_from_quat(rot_diff_quat)
-    #     self.ee_angvel_fd = rot_diff_aa / dt
-    #     self.prev_fingertip_quat = self.fingertip_midpoint_quat.clone()
-
-    #     joint_diff = self.joint_pos[:, 0:7] - self.prev_joint_pos
-    #     self.joint_vel_fd = joint_diff / dt
-    #     self.prev_joint_pos = self.joint_pos[:, 0:7].clone()
-
-    #     self.last_update_timestamp = self._robot._data._sim_timestamp
