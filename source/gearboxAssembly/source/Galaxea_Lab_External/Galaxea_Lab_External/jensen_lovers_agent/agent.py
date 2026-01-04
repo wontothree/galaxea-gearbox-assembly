@@ -168,7 +168,6 @@ class GalaxeaGearboxAssemblyAgent:
         update robot state: simulation ground truth
         """
         # Used member variables
-        num_envs = self.scene.num_envs
         env_origins = self.scene.env_origins
 
         # end effector (simulation ground truth)
@@ -182,10 +181,6 @@ class GalaxeaGearboxAssemblyAgent:
         # Base
         self.base_pos_w  = self.robot.data.root_state_w[:, 0:3]
         self.base_quat_w = self.robot.data.root_state_w[:, 3:7]
-
-        # gripper
-        left_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
-        self.current_left_gripper_state = self.robot.data.joint_pos[:, left_gripper_joint_ids]   # 2-DOF
 
     def observe_object_state(self):
         """
@@ -851,11 +846,3 @@ class GalaxeaGearboxAssemblyAgent:
         error = torch.norm(current_pos - target_pos, dim=1)
         return torch.any(error < tol)
         
-    # def position_reached(
-    #         self,
-    #         current_pos: torch.Tensor,
-    #         target_pos: torch.Tensor,
-    #         tol: float = 0.01
-    #     ) -> torch.Tensor:
-    #     error = torch.norm(current_pos - target_pos, dim=1)
-    #     return error < tol # True/False tensor of [num_envs] size
