@@ -564,7 +564,6 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
     def _compute_intermediate_values(self):
         # Simulation ground truth data
         # Used member variables
-        num_envs = self.scene.num_envs
         env_origins = self.scene.env_origins
         
         # Robot states
@@ -584,45 +583,6 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
         self.left_arm_joint_pos  = self.robot.data.joint_pos[:, left_arm_joint_ids]
         self.right_arm_joint_pos = self.robot.data.joint_pos[:, right_arm_joint_ids]
-
-        # Object states
-        # Planetary gear
-        self.sun_planetary_gear_positions_e = []
-        self.sun_planetary_gear_quats_w = []
-        sun_planetary_gear_names = [
-                'sun_planetary_gear_1', 
-                'sun_planetary_gear_2', 
-                'sun_planetary_gear_3', 
-                'sun_planetary_gear_4'
-            ]
-        for sun_planetary_gear_name in sun_planetary_gear_names:
-            gear_obj = self.obj_dict[sun_planetary_gear_name]
-            gear_pos_e = gear_obj.data.root_state_w[:, :3].clone() - env_origins
-            gear_quat_w = gear_obj.data.root_state_w[:, 3:7].clone()
-
-            self.sun_planetary_gear_positions_e.append(gear_pos_e)
-            self.sun_planetary_gear_quats_w.append(gear_quat_w)
-        
-        # Planetary carrier
-        planetary_carrier_pos_w  = self.planetary_carrier.data.root_state_w[:, :3].clone()
-        planetary_carrier_quat_w = self.planetary_carrier.data.root_state_w[:, 3:7].clone()
-
-        # Pin in planetary carrier
-        self.pin_positions_e = []
-        self.pin_quats_w = []
-        for pin_local_pos in self.pin_local_positions:
-            pin_quat_repeated = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs, 1)
-            pin_local_pos_repeated = pin_local_pos.repeat(num_envs, 1)
-
-            pin_quat, pin_pos = torch_utils.tf_combine(
-                planetary_carrier_quat_w, 
-                planetary_carrier_pos_w, 
-                pin_quat_repeated, 
-                pin_local_pos_repeated
-            )
-
-            self.pin_positions_e.append(pin_pos - env_origins)
-            self.pin_quats_w.append(pin_quat)
 
     def _get_obs_state_dict(self):
         """Populate dictionaries for the policy and critic."""
