@@ -565,13 +565,12 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # Simulation ground truth data
         # Used member variables
         env_origins = self.scene.env_origins
-        
-        # Robot states
         left_arm_body_ids        = self.left_arm_entity_cfg.body_ids
         left_arm_joint_ids       = self.left_arm_entity_cfg.joint_ids
         right_arm_body_ids       = self.right_arm_entity_cfg.body_ids
         right_arm_joint_ids      = self.right_arm_entity_cfg.joint_ids
 
+        # End effector states
         self.left_ee_pos_e       = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
         self.left_ee_quat_w      = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
         self.left_ee_linvel_w    = self.robot.data.body_state_w[:, left_arm_body_ids[0], 7:10]
@@ -581,6 +580,7 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         self.right_ee_linvel_w   = self.robot.data.body_state_w[:, right_arm_body_ids[0], 7:10]
         self.right_ee_angvel_w   = self.robot.data.body_state_w[:, right_arm_body_ids[0], 10:13]
 
+        # Arm joint positions
         self.left_arm_joint_pos  = self.robot.data.joint_pos[:, left_arm_joint_ids]
         self.right_arm_joint_pos = self.robot.data.joint_pos[:, right_arm_joint_ids]
 
@@ -588,31 +588,49 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         """Populate dictionaries for the policy and critic."""
         # Used member variables
         prev_actions = None
+        gear_pos_e   = self.agent.target_pick_pos_w - self.scene.env_origins
+        gear_quat_w  = self.agent.target_pick_quat_w
+        pin_pos_e    = self.agent.target_place_pos_w - self.scene.env_origins
+
+        # Decide arm
+        arm_name = self.agent.active_arm_name
+        if arm_name == "left":
+            ee_pos_e      = self.left_ee_pos_e
+            ee_quat_w     = self.left_ee_quat_w
+            ee_linevel_w  = self.left_ee_linvel_w
+            ee_angvel_w   = self.left_ee_angvel_w
+            arm_joint_pos = self.left_arm_joint_pos
+        elif arm_name == "right":
+            ee_pos_e      = self.right_ee_pos_e
+            ee_quat_w     = self.right_ee_quat_w
+            ee_linevel_w  = self.right_ee_linvel_w
+            ee_angvel_w   = self.right_ee_angvel_w
+            arm_joint_pos = self.right_arm_joint_pos
 
         obs_dict = {
-            "fingertip_pos": 1,
-            "fingertip_pos_rel_fixed": 2,
-            "fingertip_quat": 3,
-            "ee_linvel": 4,
-            "ee_angvel": 5,
-            "prev_actions": 6
+            "fingertip_pos": ee_pos_e,
+            "fingertip_pos_rel_fixed": ee_pos_e - pin_pos_e,
+            "fingertip_quat": ee_quat_w,
+            "ee_linvel": ee_linevel_w,
+            "ee_angvel": ee_angvel_w,
+            "prev_actions": prev_actions
         }
         state_dict = {
-            "fingertip_pos": 1,
-            "fingertip_pos_rel, fixed": 2,
-            "fingertip_quat": 3,
-            "ee_linvel": 4,
-            "ee_angvel": 5,
-            "joint_ps": 6,
-            "held_pos": 7,
-            "held_pos_rel_fixed": 8,
-            "held_quat": 9,
-            "fixed_pos": 10,
+            "fingertip_pos": ee_pos_e,
+            "fingertip_pos_rel_fixed": ee_pos_e - pin_pos_e,
+            "fingertip_quat": ee_quat_w,
+            "ee_linvel": ee_linevel_w,
+            "ee_angvel": ee_angvel_w,
+            "joint_ps": arm_joint_pos,
+            "held_pos": gear_pos_e,
+            "held_pos_rel_fixed": gear_pos_e - pin_pos_e,
+            "held_quat": gear_quat_w,
+            "fixed_pos": pin_pos_e,
             "fixed_quat": 11,
             "task_prop_gains": 12,
             "pos_threshold": 13,
             "rot_threshold": 14,
-            "prev_actions": 15
+            "prev_actions": prev_actions
         }
         return obs_dict, state_dict
 
