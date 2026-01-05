@@ -37,14 +37,14 @@ class GalaxeaGearboxAssemblyAgent:
         self.robot = scene["robot"]
 
         # Object state
-        self.obj_dict = obj_dict
-        self.planetary_carrier = obj_dict["planetary_carrier"]
-        self.ring_gear = obj_dict["ring_gear"]
+        self.obj_dict             = obj_dict
+        self.planetary_carrier    = obj_dict["planetary_carrier"]
+        self.ring_gear            = obj_dict["ring_gear"]
         self.sun_planetary_gear_1 = obj_dict["sun_planetary_gear_1"]
         self.sun_planetary_gear_2 = obj_dict["sun_planetary_gear_2"]
         self.sun_planetary_gear_3 = obj_dict["sun_planetary_gear_3"]
         self.sun_planetary_gear_4 = obj_dict["sun_planetary_gear_4"]
-        self.planetary_reducer = obj_dict["planetary_reducer"]
+        self.planetary_reducer    = obj_dict["planetary_reducer"]
 
         # Define pin positions in local coordinates relative to planetary carrier
         self.pin_local_positions = [
@@ -118,6 +118,9 @@ class GalaxeaGearboxAssemblyAgent:
         self.unmounted_sun_planetary_gear_positions = []
         self.unmounted_sun_planetary_gear_quats = []
         self.unmounted_pin_positions = []
+        self.target_sun_planetary_gear_pos = None
+        self.target_sun_planetary_gear_quat = None
+        self.target_pin_pos = None
 
         # -------------------------------------------------------------------------------------------------------------------------- #
         # [Function] pick_and_place ------------------------------------------------------------------------------------------------ #
@@ -126,9 +129,9 @@ class GalaxeaGearboxAssemblyAgent:
         self.initial_left_ee_quat_w        = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
         self.initial_right_ee_pos_e        = torch.tensor([[0.3864, -0.5237, 1.1475]], device=self.device) - self.scene.env_origins
         self.initial_right_ee_quat_w       = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
-        self.initial_left_ee_pos_e_batch   = self.initial_left_ee_pos_e.repeat(self.scene.num_envs, 1)
+        self.initial_left_ee_pos_e_batch   = self.initial_left_ee_pos_e
         self.initial_left_ee_quat_w_batch  = self.initial_left_ee_quat_w.repeat(self.scene.num_envs, 1)
-        self.initial_right_ee_pos_e_batch  = self.initial_right_ee_pos_e.repeat(self.scene.num_envs, 1)
+        self.initial_right_ee_pos_e_batch  = self.initial_right_ee_pos_e
         self.initial_right_ee_quat_w_batch = self.initial_right_ee_quat_w.repeat(self.scene.num_envs, 1)
 
         self.TCP_offset_z = 1.1475 - 1.05661
@@ -151,13 +154,25 @@ class GalaxeaGearboxAssemblyAgent:
 
         self.active_arm_name = None
         self.active_gripper_joint_ids = None
+
+        self.target_pick_pos_b           = None
+        self.target_pick_quat_b          = None
+        self.target_pick_ready_pos_b     = None
+        self.target_place_quat_b         = None
+        self.target_place_ready_pos_b    = None
+        self.target_place_approach_pos_b = None
+        self.target_pick_pos_w           = None # *
+        self.target_pick_quat_w          = None # *
+        self.target_pick_ready_pos_w     = None
+        self.target_place_pos_w          = None # *
+        self.target_place_ready_pos_w    = None
+        self.target_place_approach_pos_w = None
     
     def observe_robot_state(self):
         """
         update robot state: simulation ground truth
         """
         # Used member variables
-        num_envs = self.scene.num_envs
         env_origins = self.scene.env_origins
 
         # end effector (simulation ground truth)
@@ -171,10 +186,6 @@ class GalaxeaGearboxAssemblyAgent:
         # Base
         self.base_pos_w  = self.robot.data.root_state_w[:, 0:3]
         self.base_quat_w = self.robot.data.root_state_w[:, 3:7]
-
-        # gripper
-        left_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
-        self.current_left_gripper_state = self.robot.data.joint_pos[:, left_gripper_joint_ids]   # 2-DOF
 
     def observe_object_state(self):
         """
@@ -298,7 +309,6 @@ class GalaxeaGearboxAssemblyAgent:
 
             new_gear_pos_list = []
             new_gear_quat_list = []
-            
             for i in range(sorted_gear_indices.shape[0]): 
                 row_pos = torch.stack([gear_positions_batch[sorted_gear_indices[i, e], e] for e in range(num_envs)], dim=0)
                 row_quat = torch.stack([gear_quats_batch[sorted_gear_indices[i, e], e] for e in range(num_envs)], dim=0)
@@ -367,6 +377,10 @@ class GalaxeaGearboxAssemblyAgent:
                 vertical_error < th["vertical"] and
                 orientation_error < th["orientation"]):
                 self.is_planetary_reducer_mounted = True
+
+        self.target_sun_planetary_gear_pos = self.unmounted_sun_planetary_gear_positions[0][:, 0, :].clone()
+        self.target_sun_planetary_gear_quat = self.unmounted_sun_planetary_gear_quats[0][:, 0, :].clone()
+        self.target_pin_pos = self.unmounted_pin_positions[0][:, 0, :].clone()
 
         print("| Aseembly State                       |")
         print("----------------------------------------")
@@ -491,9 +505,9 @@ class GalaxeaGearboxAssemblyAgent:
 
         # Used member variables
         num_envs = self.scene.num_envs
-        unmounted_sun_planetary_gear_positions = self.unmounted_sun_planetary_gear_positions
-        unmounted_sun_planetary_gear_quats = self.unmounted_sun_planetary_gear_quats
-        unmounted_pin_positions = self.unmounted_pin_positions
+        target_sun_planetary_gear_pos = self.target_sun_planetary_gear_pos
+        target_sun_planetary_gear_quat = self.target_sun_planetary_gear_quat
+        target_pin_pos = self.target_pin_pos
         initial_left_ee_pos_e = self.initial_left_ee_pos_e
         initial_left_ee_quat_w = self.initial_left_ee_quat_w
         initial_right_ee_pos_e = self.initial_right_ee_pos_e
@@ -523,72 +537,85 @@ class GalaxeaGearboxAssemblyAgent:
         elif object_name == "planetary_gear":
             object_height_offset = 0.0
 
-        if len(self.unmounted_pin_positions) >= 1:
-            # Pick
-            target_pick_pos_w = unmounted_sun_planetary_gear_positions[0].squeeze(1).clone()
-            target_pick_quat_w = unmounted_sun_planetary_gear_quats[0].squeeze(1).clone()
-            
-            target_pick_pos_w[:, 2] = self.table_height + self.grasping_height + object_height_offset
-            target_pick_pos_w = target_pick_pos_w + torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
-
-            rotate_y_180_batch = torch.tensor([[0.0, 1.0, 0.0, 0.0]], device=self.device).repeat(num_envs, 1)
-            zero_pos_batch = torch.tensor([[0.0, 0.0, 0.0]], device=self.device).repeat(num_envs, 1)
-
-            target_pick_quat_w, target_pick_pos_w = torch_utils.tf_combine( # Rotate the target orientation 180 degrees around the y-axis
-                target_pick_quat_w, 
-                target_pick_pos_w,
-                rotate_y_180_batch, # (num_envs, 4)
-                zero_pos_batch      # (num_envs, 3)
-            )
-            target_pick_ready_pos_w = target_pick_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
-
-            # Transform coordinate from world to base
-            target_pick_pos_b, target_pick_quat_b = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_pick_pos_w,
-                target_pick_quat_w   
-            )
-            target_pick_ready_pos_b, _ = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_pick_ready_pos_w,
-                target_pick_quat_w  
-            )
-
-            # Place
-            target_place_pos_w = unmounted_pin_positions[0].squeeze(1).clone()
-            target_place_pos_w[:, 2] = self.table_height + self.grasping_height
-            target_place_pos_w[:, 2] += object_height_offset
-            target_place_pos_w += torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
-            target_place_quat_w_batch = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device).repeat(num_envs, 1)
-            target_place_ready_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
-            target_place_approach_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.02], device=self.device)
-
-            _, target_place_quat_b = subtract_frame_transforms(
-                base_pos_w,                 # (num_envs, 3)
-                base_quat_w,                # (num_envs, 4)
-                target_place_pos_w,         # (num_envs, 3)
-                target_place_quat_w_batch   # (num_envs, 4)
-            )
-            target_place_ready_pos_b, _ = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_place_ready_pos_w,
-                target_place_quat_w_batch   
-            )
-            target_place_approach_pos_b, _ = subtract_frame_transforms(
-                base_pos_w,
-                base_quat_w,
-                target_place_approach_pos_w,
-                target_place_quat_w_batch   
-            )
-
         print(f"[PICK & PLACE FSM] {self.pick_and_place_fsm_state}")
         # -------------------------------------------------------------------------------------------------------------------------- #
         # [FSM Start State] INITIALIZATION ----------------------------------------------------------------------------------------- # 
         # -------------------------------------------------------------------------------------------------------------------------- #
         if self.pick_and_place_fsm_state == PickAndPlaceState.INITIALIZATION:
+
+            if len(self.unmounted_pin_positions) >= 1:
+                # Pick
+                # target_pick_pos_w = unmounted_sun_planetary_gear_positions[0][:, 0, :].clone()
+                # target_pick_quat_w = unmounted_sun_planetary_gear_quats[0][:, 0, :].clone()
+                target_pick_pos_w = target_sun_planetary_gear_pos
+                target_pick_quat_w = target_sun_planetary_gear_quat
+
+                target_pick_pos_w[:, 2] = self.table_height + self.grasping_height + object_height_offset
+                target_pick_pos_w = target_pick_pos_w + torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
+
+                rotate_y_180_batch = torch.tensor([[0.0, 1.0, 0.0, 0.0]], device=self.device).repeat(num_envs, 1)
+                zero_pos_batch = torch.tensor([[0.0, 0.0, 0.0]], device=self.device).repeat(num_envs, 1)
+                target_pick_quat_w, target_pick_pos_w = torch_utils.tf_combine( # Rotate the target orientation 180 degrees around the y-axis
+                    target_pick_quat_w, 
+                    target_pick_pos_w,
+                    rotate_y_180_batch, 
+                    zero_pos_batch      
+                )
+                target_pick_ready_pos_w = target_pick_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
+
+                # Update member variables
+                self.target_pick_pos_w       = target_pick_pos_w
+                self.target_pick_quat_w      = target_pick_quat_w
+                self.target_pick_ready_pos_w = target_pick_ready_pos_w
+
+                # Transform coordinate from world to base
+                self.target_pick_pos_b, self.target_pick_quat_b = subtract_frame_transforms(
+                    base_pos_w,
+                    base_quat_w,
+                    target_pick_pos_w,
+                    target_pick_quat_w   
+                )
+                self.target_pick_ready_pos_b, _ = subtract_frame_transforms(
+                    base_pos_w,
+                    base_quat_w,
+                    target_pick_ready_pos_w,
+                    target_pick_quat_w  
+                )
+
+                # Place
+                # target_place_pos_w = unmounted_pin_positions[0][:, 0, :].clone()
+                target_place_pos_w = target_pin_pos
+                target_place_pos_w[:, 2] = self.table_height + self.grasping_height
+                target_place_pos_w[:, 2] += object_height_offset
+                target_place_pos_w += torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
+                target_place_quat_w_batch = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device).repeat(num_envs, 1)
+                target_place_ready_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.1], device=self.device)
+                target_place_approach_pos_w = target_place_pos_w + torch.tensor([0.0, 0.0, 0.02], device=self.device)
+
+                # Update member variables
+                self.target_place_pos_w = target_place_pos_w
+                self.target_place_ready_pos_w = target_place_ready_pos_w
+                self.target_place_approach_pos_w = target_place_approach_pos_w
+
+                _, self.target_place_quat_b = subtract_frame_transforms(
+                    base_pos_w,                 # (num_envs, 3)
+                    base_quat_w,                # (num_envs, 4)
+                    target_place_pos_w,         # (num_envs, 3)
+                    target_place_quat_w_batch   # (num_envs, 4)
+                )
+                self.target_place_ready_pos_b, _ = subtract_frame_transforms(
+                    base_pos_w,
+                    base_quat_w,
+                    target_place_ready_pos_w,
+                    target_place_quat_w_batch   
+                )
+                self.target_place_approach_pos_b, _ = subtract_frame_transforms(
+                    base_pos_w,
+                    base_quat_w,
+                    target_place_approach_pos_w,
+                    target_place_quat_w_batch   
+                )
+
             initial_left_ee_pos_b, initial_left_ee_quat_b = subtract_frame_transforms(
                 base_pos_w,
                 base_quat_w,
@@ -630,8 +657,8 @@ class GalaxeaGearboxAssemblyAgent:
             )
 
             # Decide arm and gripper configuration
-            dist_left = torch.norm(target_pick_pos_w - initial_left_ee_pos_e)
-            dist_right = torch.norm(target_pick_pos_w - initial_right_ee_pos_e)
+            dist_left = torch.norm(target_pick_pos_w - initial_left_ee_pos_e, dim=1).mean()
+            dist_right = torch.norm(target_pick_pos_w - initial_right_ee_pos_e, dim=1).mean()
             if dist_left <= dist_right:
                 self.active_arm_name = "left"
                 self.active_gripper_joint_ids = self.left_gripper_entity_cfg.joint_ids
@@ -645,8 +672,20 @@ class GalaxeaGearboxAssemblyAgent:
                 self.pick_and_place_fsm_timer = 0
                 self.pick_and_place_fsm_state = PickAndPlaceState.PICK_READY
 
-        arm_name = self.active_arm_name
-        gripper_joint_ids = self.active_gripper_joint_ids
+        # Used member variables
+        target_pick_pos_b           = self.target_pick_pos_b
+        target_pick_quat_b          = self.target_pick_quat_b
+        target_pick_ready_pos_b     = self.target_pick_ready_pos_b
+        target_place_quat_b         = self.target_place_quat_b
+        target_place_ready_pos_b    = self.target_place_ready_pos_b
+        target_place_approach_pos_b = self.target_place_approach_pos_b
+        target_pick_pos_w           = self.target_pick_pos_w
+        target_pick_ready_pos_w     = self.target_pick_ready_pos_w
+        target_place_ready_pos_w    = self.target_place_ready_pos_w
+        target_place_approach_pos_w = self.target_place_approach_pos_w
+
+        gripper_joint_ids           = self.active_gripper_joint_ids
+        arm_name                    = self.active_arm_name
         if arm_name == "left":
             ee_pos_w = left_ee_pos_w
         else:
@@ -696,9 +735,7 @@ class GalaxeaGearboxAssemblyAgent:
         # [FSM Intermediate State] PICK_EXECUTION ---------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         elif self.pick_and_place_fsm_state == PickAndPlaceState.PICK_EXECUTION:
-
-            desired_joint_position = torch.tensor([[0.0, 0.0]], device=self.device)
-            # desired_joint_position = torch.tensor([[0.0]], device=self.device)
+            desired_joint_position = torch.tensor([[0.03, 0.03]], device=self.device)
             desired_joint_ids = gripper_joint_ids
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = desired_joint_ids
@@ -814,13 +851,5 @@ class GalaxeaGearboxAssemblyAgent:
     # Utility functions
     def position_reached(self, current_pos, target_pos, tol=0.01):
         error = torch.norm(current_pos - target_pos, dim=1)
-        return torch.all(error < tol)
+        return torch.any(error < tol)
         
-    # def position_reached(
-    #         self,
-    #         current_pos: torch.Tensor,
-    #         target_pos: torch.Tensor,
-    #         tol: float = 0.01
-    #     ) -> torch.Tensor:
-    #     error = torch.norm(current_pos - target_pos, dim=1)
-    #     return error < tol # True/False tensor of [num_envs] size
