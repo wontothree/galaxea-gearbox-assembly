@@ -179,13 +179,32 @@ source install/setup.bash
 ## Train
 
 ```bash
-python scripts/rule_based_agent.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
-
 python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --num_envs=1 --device cpu
 ```
 
 ```bash
+python scripts/rule_based_agent.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
 python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
+```
+
+# Task
+
+- Task 1
+
+```bash
+python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
+```
+
+- Task 2
+
+```bash
+python scripts/rule_based_agent.py --task=Gearbox-Partial-Lackfourth --enable_cameras --device cpu
+```
+
+- Task 3
+
+```bash
+python scripts/rule_based_agent.py --task=Gearbox-Recovery-Misplacedfourth --enable_cameras --device cpu
 ```
 
 This project is tested in the environment of Docker and Window 11.

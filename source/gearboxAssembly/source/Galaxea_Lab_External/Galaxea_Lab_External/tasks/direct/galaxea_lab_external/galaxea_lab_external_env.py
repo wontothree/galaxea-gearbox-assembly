@@ -163,13 +163,6 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
             ),
             dim=-1,
         )
-
-        # obs = dict(
-        #     left_arm_joint_pos=self.left_arm_joint_pos, 
-        #     right_arm_joint_pos=self.right_arm_joint_pos,
-        #     left_gripper_joint_pos=self.left_gripper_joint_pos, 
-        #     right_gripper_joint_pos=self.right_gripper_joint_pos
-        # )
             
         observations = {"policy": obs}
         return observations
@@ -282,6 +275,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         finish_task = torch.tensor(self.evaluate_score() == 6, device=self.device)
         time_out = self.episode_length_buf >= self.max_episode_length - 1
+        time_out = False
         return finish_task, time_out
 
     def _initialize_scene(self):

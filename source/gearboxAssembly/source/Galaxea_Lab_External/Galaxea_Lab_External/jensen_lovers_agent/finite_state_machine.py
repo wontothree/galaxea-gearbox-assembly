@@ -75,16 +75,13 @@ class PlanetaryGearMountingState(State):
         context.agent.reset_pick_and_place()
 
     def update(self, context):
-        context.agent.pick_and_place(
-            object_name="planetary_gear"
-        )
+        context.agent.pick_and_place(object_name="planetary_gear")
 
         if context.agent.pick_and_place_fsm_state == "FINALIZATION":
             if context.is_all_planetary_gear_mounted:
                 # [State Transition] Planetary Gear Mounting -> Sun Gear Mounting
                 context.fsm.transition_to(SunGearMountingState())
         
-
     def exit(self, context):
         print("[FSM Intermediate State] Planetary Gear Mounting: exit")
 
@@ -94,9 +91,15 @@ class PlanetaryGearMountingState(State):
 class SunGearMountingState(State):
     def enter(self, context):
         print("[FSM Intermediate State] Sun Gear Mouting: enter")
+        context.agent.reset_pick_and_place()
     
     def update(self, context):
-        print("We success to assembly 3 peace")
+        context.agent.pick_and_place(object_name="sun_gear")
+
+        if context.agent.pick_and_place_fsm_state == "FINALIZATION":
+            if context.is_sun_gear_mounted:
+                # [State Transition] Sun Gear Mounting -> Ring Gear Mounting
+                context.fsm.transition_to(RingGearMountingState())
 
     def exit(self, context):
         print("[FSM Intermediate State] Sun Gear Mounting: exit")
@@ -105,7 +108,14 @@ class SunGearMountingState(State):
 # [FSM Intermediate State] Ring Gear Mounting ------------------------------------------------------------------------------ #
 # -------------------------------------------------------------------------------------------------------------------------- #
 class RingGearMountingState(State):
-    pass
+    def enter(self, context):
+        print("[FSM Intermediate State] Ring Gear Mouting: enter")
+    
+    def update(self, context):
+        pass
+
+    def exit(self, context):
+        print("[FSM Intermediate State] Ring Gear Mounting: exit")
 
 # -------------------------------------------------------------------------------------------------------------------------- #
 # [FSM Intermediate State] Planetary Reducer Mounting ---------------------------------------------------------------------- #
