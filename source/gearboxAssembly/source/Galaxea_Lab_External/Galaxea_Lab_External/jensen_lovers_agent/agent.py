@@ -118,6 +118,9 @@ class GalaxeaGearboxAssemblyAgent:
         self.unmounted_sun_planetary_gear_positions = []
         self.unmounted_sun_planetary_gear_quats = []
         self.unmounted_pin_positions = []
+        self.target_sun_planetary_gear_pos = None
+        self.target_sun_planetary_gear_quat = None
+        self.target_pin_pos = None
 
         # -------------------------------------------------------------------------------------------------------------------------- #
         # [Function] pick_and_place ------------------------------------------------------------------------------------------------ #
@@ -375,6 +378,10 @@ class GalaxeaGearboxAssemblyAgent:
                 orientation_error < th["orientation"]):
                 self.is_planetary_reducer_mounted = True
 
+        self.target_sun_planetary_gear_pos = self.unmounted_sun_planetary_gear_positions[0][:, 0, :].clone()
+        self.target_sun_planetary_gear_quat = self.unmounted_sun_planetary_gear_quats[0][:, 0, :].clone()
+        self.target_pin_pos = self.unmounted_pin_positions[0][:, 0, :].clone()
+
         print("| Aseembly State                       |")
         print("----------------------------------------")
         print(f"| # of mounted planetary gears | {self.num_mounted_planetary_gears}     |")
@@ -498,9 +505,9 @@ class GalaxeaGearboxAssemblyAgent:
 
         # Used member variables
         num_envs = self.scene.num_envs
-        unmounted_sun_planetary_gear_positions = self.unmounted_sun_planetary_gear_positions
-        unmounted_sun_planetary_gear_quats = self.unmounted_sun_planetary_gear_quats
-        unmounted_pin_positions = self.unmounted_pin_positions
+        target_sun_planetary_gear_pos = self.target_sun_planetary_gear_pos
+        target_sun_planetary_gear_quat = self.target_sun_planetary_gear_quat
+        target_pin_pos = self.target_pin_pos
         initial_left_ee_pos_e = self.initial_left_ee_pos_e
         initial_left_ee_quat_w = self.initial_left_ee_quat_w
         initial_right_ee_pos_e = self.initial_right_ee_pos_e
@@ -538,8 +545,10 @@ class GalaxeaGearboxAssemblyAgent:
 
             if len(self.unmounted_pin_positions) >= 1:
                 # Pick
-                target_pick_pos_w = unmounted_sun_planetary_gear_positions[0][:, 0, :].clone()
-                target_pick_quat_w = unmounted_sun_planetary_gear_quats[0][:, 0, :].clone()
+                # target_pick_pos_w = unmounted_sun_planetary_gear_positions[0][:, 0, :].clone()
+                # target_pick_quat_w = unmounted_sun_planetary_gear_quats[0][:, 0, :].clone()
+                target_pick_pos_w = target_sun_planetary_gear_pos
+                target_pick_quat_w = target_sun_planetary_gear_quat
 
                 target_pick_pos_w[:, 2] = self.table_height + self.grasping_height + object_height_offset
                 target_pick_pos_w = target_pick_pos_w + torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
@@ -574,7 +583,8 @@ class GalaxeaGearboxAssemblyAgent:
                 )
 
                 # Place
-                target_place_pos_w = unmounted_pin_positions[0][:, 0, :].clone()
+                # target_place_pos_w = unmounted_pin_positions[0][:, 0, :].clone()
+                target_place_pos_w = target_pin_pos
                 target_place_pos_w[:, 2] = self.table_height + self.grasping_height
                 target_place_pos_w[:, 2] += object_height_offset
                 target_place_pos_w += torch.tensor([self.TCP_offset_x, 0.0, self.TCP_offset_z], device=self.device)
@@ -725,9 +735,7 @@ class GalaxeaGearboxAssemblyAgent:
         # [FSM Intermediate State] PICK_EXECUTION ---------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         elif self.pick_and_place_fsm_state == PickAndPlaceState.PICK_EXECUTION:
-
-            desired_joint_position = torch.tensor([[0.0, 0.0]], device=self.device)
-            # desired_joint_position = torch.tensor([[0.0]], device=self.device)
+            desired_joint_position = torch.tensor([[0.03, 0.03]], device=self.device)
             desired_joint_ids = gripper_joint_ids
             self.joint_position_command = desired_joint_position
             self.joint_command_ids = desired_joint_ids
