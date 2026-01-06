@@ -192,19 +192,19 @@ python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 
 - Task 1
 
 ```bash
-python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
+python scripts/jensen_lovers_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --num_envs=1 --device cpu
 ```
 
 - Task 2
 
 ```bash
-python scripts/rule_based_agent.py --task=Gearbox-Partial-Lackfourth --enable_cameras --device cpu
+python scripts/jensen_lovers_agent.py --task=Gearbox-Partial-Lackfourth --enable_cameras --num_envs=1 --device cpu
 ```
 
 - Task 3
 
 ```bash
-python scripts/rule_based_agent.py --task=Gearbox-Recovery-Misplacedfourth --enable_cameras --device cpu
+python scripts/jensen_lovers_agent.py --task=Gearbox-Recovery-Misplacedfourth --enable_cameras --num_envs=1 --device cpu
 ```
 
 This project is tested in the environment of Docker and Window 11.
