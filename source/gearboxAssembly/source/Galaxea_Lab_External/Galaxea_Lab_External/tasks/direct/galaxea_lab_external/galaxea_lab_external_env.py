@@ -27,6 +27,9 @@ import isaacsim.core.utils.torch as torch_utils
 from Galaxea_Lab_External.robots import GalaxeaRulePolicy
 from isaaclab.sensors import Camera
 
+from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
+from ....jensen_lovers_agent.finite_state_machine import StateMachine, Context, InitializationState
+
 class GalaxeaLabExternalEnv(DirectRLEnv):
     cfg: GalaxeaLabExternalEnvCfg
 
@@ -61,6 +64,18 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
         self.rule_policy = GalaxeaRulePolicy(sim_utils.SimulationContext.instance(), self.scene, self.obj_dict)
         self.initial_root_state = None
+
+        # ------------------------------------------------------
+        self.agent = GalaxeaGearboxAssemblyAgent(
+            sim=sim_utils.SimulationContext.instance(),
+            scene=self.scene,
+            obj_dict=self.obj_dict
+        )
+        self.context = Context(sim_utils.SimulationContext.instance(), self.agent)
+        initial_state = InitializationState()
+        fsm = StateMachine(initial_state, self.context)
+        self.context.fsm = fsm
+        # ------------------------------------------------------
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -126,21 +141,23 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         # print(f"_pre_physics_step actions: {self.actions}")
 
     def _apply_action(self) -> None:
-        self.action, joint_ids = self.rule_policy.get_action()
-        if self.action is not None:
-            self.robot.set_joint_position_target(self.action, joint_ids=joint_ids)
-        # else:
-        #     joint_pos = self.robot.data.default_joint_pos[:, self._joint_idx]
-        #     self.robot.write_joint_position_to_sim(joint_pos, self._joint_idx, None)
+        # self.action, joint_ids = self.rule_policy.get_action()
+        # if self.action is not None:
+        #     self.robot.set_joint_position_target(self.action, joint_ids=joint_ids)
+
+        self.context.fsm.update()
+        joint_command = self.agent.joint_position_command # (num_envs, n_joints)
+        joint_ids = self.agent.joint_command_ids
+        if joint_command is not None:
+            self.robot.set_joint_position_target(
+                joint_command, 
+                joint_ids=joint_ids,
+                env_ids=self.robot._ALL_INDICES
+            )
+
         self.rule_policy.count += 1
         sim_dt = self.sim.get_physics_dt()
         print(f"Time: {self.rule_policy.count * sim_dt}")
-        # print(f"action: {self.action}")
-        # print(f"joint_ids: {joint_ids}")
-
-        # pos = self.scene["sun_planetary_gear_1"].data.root_state_w[:, :3].clone()
-        # pos = self.sun_planetary_gear_1.get_world_pose()
-        # print(f"1 scene pos root: {pos}")
 
         for obj_name, obj in self.obj_dict.items():
             obj.update(sim_dt)
@@ -444,9 +461,6 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
             initial_root_state[obj_name] = root_state.clone()
 
         return initial_root_state
-
-
-
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None:
