@@ -375,7 +375,8 @@ class GalaxeaReachDiffIKEnv(DirectRLEnv):
         self.diff_ik_controller.reset()
         
         # Reset joint position targets
-        self.joint_pos_des[env_ids] = joint_pos[env_ids][:, self._left_arm_joint_idx] if len(env_ids) > 0 else self.joint_pos_des[env_ids]
+        # Note: joint_pos is already indexed by env_ids, so we don't need to index it again
+        self.joint_pos_des[env_ids] = joint_pos[:, self._left_arm_joint_idx] if len(env_ids) > 0 else self.joint_pos_des[env_ids]
         
         # Reset buffers
         self.actions[env_ids] = 0.0

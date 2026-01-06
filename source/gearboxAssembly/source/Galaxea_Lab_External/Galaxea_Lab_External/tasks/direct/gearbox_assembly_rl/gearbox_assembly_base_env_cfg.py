@@ -176,3 +176,10 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
     initial_torso_joint3_pos = 0.5
 
     x_offset = 0.2
+
+    # ===== IK settings =====
+    ik_method: str = "dls"  # Damped Least Squares
+    
+    # ===== Action thresholds =====
+    pos_action_threshold = (0.05, 0.05, 0.05)  # max position delta per step
+    rot_action_threshold = (0.1, 0.1, 0.1)     # max rotation delta per step (rad)
