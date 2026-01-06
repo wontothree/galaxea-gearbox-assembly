@@ -551,13 +551,9 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
     # Action ------------------------------------------------------------------------------------------------------------------- # 
     # -------------------------------------------------------------------------------------------------------------------------- #
     def _apply_action(self) -> None:
-        # self._compute_intermediate_values()
-
         self.context.fsm.update()
-        
         joint_command = self.agent.joint_position_command # (num_envs, n_joints)
         joint_ids = self.agent.joint_command_ids
-        
         if joint_command is not None:
             self.robot.set_joint_position_target(
                 joint_command, 

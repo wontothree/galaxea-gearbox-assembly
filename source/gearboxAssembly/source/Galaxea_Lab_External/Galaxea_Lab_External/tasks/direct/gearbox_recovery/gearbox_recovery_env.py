@@ -29,12 +29,15 @@ from isaaclab.sim.spawners.materials import spawn_rigid_body_material
 from isaaclab.managers import SceneEntityCfg
 import isaaclab.envs.mdp as mdp
 
+import h5py
+
 import isaacsim.core.utils.torch as torch_utils
 
 from Galaxea_Lab_External.robots.recovery_rule_policy import RecoveryRulePolicy
 from isaaclab.sensors import Camera
 
-import h5py
+from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
+from ....jensen_lovers_agent.finite_state_machine import StateMachine, Context, SunGearMountingState
 
 class GalaxeaLabExternalEnv(DirectRLEnv):
     cfg: GalaxeaLabExternalEnvCfg
@@ -122,10 +125,19 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
             '/current_time': [],
         }
 
+        # ------------------------------------------------------
+        self.agent = GalaxeaGearboxAssemblyAgent(
+            sim=sim_utils.SimulationContext.instance(),
+            scene=self.scene,
+            obj_dict=self.obj_dict
+        )
+        self.context = Context(sim_utils.SimulationContext.instance(), self.agent)
+        initial_state = SunGearMountingState()                                       # MUST generalize
+        fsm = StateMachine(initial_state, self.context)
+        self.context.fsm = fsm
+        # ------------------------------------------------------
+
     def _setup_scene(self):
-
-        print(f"--------------------------------SETUP SCENE--------------------------------")
-
         self.robot = Articulation(self.cfg.robot_cfg)
         
         self.head_camera = Camera(self.cfg.head_camera_cfg)
@@ -198,14 +210,22 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         # print(f"Time: {self.rule_policy.count * self.sim.get_physics_dt()}, Apply action")
         current_time_s = mdp.observations.current_time_s(self)
         print(f"Apply action: {current_time_s.item()} seconds")
-        # action, joint_ids = self.rule_policy.get_action()
-        action = self.env_step_action
-        joint_ids = self.env_step_joint_ids
-        # print(f"action: {action.item()}")
 
-        # Apply action only if use_action is True
-        if self.use_action and joint_ids is not None:
-            self.robot.set_joint_position_target(action, joint_ids=joint_ids)
+        # action = self.env_step_action
+        # joint_ids = self.env_step_joint_ids
+        # # Apply action only if use_action is True
+        # if self.use_action and joint_ids is not None:
+        #     self.robot.set_joint_position_target(action, joint_ids=joint_ids)
+
+        self.context.fsm.update()
+        joint_command = self.agent.joint_position_command # (num_envs, n_joints)
+        joint_ids = self.agent.joint_command_ids
+        if joint_command is not None:
+            self.robot.set_joint_position_target(
+                joint_command, 
+                joint_ids=joint_ids,
+                env_ids=self.robot._ALL_INDICES
+            )
 
         self.rule_policy.count += 1
         sim_dt = self.sim.get_physics_dt()
@@ -901,8 +921,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
 
         current_time_s = mdp.observations.current_time_s(self)
-        print(f"--------------------------------RL step at {current_time_s.item()} seconds--------------------------------")
-        print(f"####################################################Before step####################################################")
+        # print(f"--------------------------------RL step at {current_time_s.item()} seconds--------------------------------")
+        # print(f"####################################################Before step####################################################")
 
         action = action.to(self.device)
         # add action noise
