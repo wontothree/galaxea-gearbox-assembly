@@ -969,68 +969,68 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
         # -- reset envs that terminated/timed-out and log the episode information
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
-        if len(reset_env_ids) > 0:
-            print(f"Writing data to hdf5 file")
-            with h5py.File(self.save_hdf5_file_name, 'w') as f:
-                f.attrs['sim'] = True
-                obs = f.create_group('observations')
-                act = f.create_group('actions')
-                num_items = len(self.data_dict['/observations/head_rgb'])
-                obs.create_dataset('head_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
-                obs.create_dataset('left_hand_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
-                obs.create_dataset('right_hand_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
-                obs.create_dataset('head_depth', shape=(num_items, 240, 320), dtype='float32')
-                obs.create_dataset('left_hand_depth', shape=(num_items, 240, 320), dtype='float32')
-                obs.create_dataset('right_hand_depth', shape=(num_items, 240, 320), dtype='float32')
-                obs.create_dataset('left_arm_joint_pos', shape=(num_items, 6), dtype='float32')
-                obs.create_dataset('right_arm_joint_pos', shape=(num_items, 6), dtype='float32')
-                obs.create_dataset('left_gripper_joint_pos', shape=(num_items, ), dtype='float32')
-                obs.create_dataset('right_gripper_joint_pos', shape=(num_items, ), dtype='float32')
-                obs.create_dataset('left_arm_joint_vel', shape=(num_items, 6), dtype='float32')
-                obs.create_dataset('right_arm_joint_vel', shape=(num_items, 6), dtype='float32')
-                obs.create_dataset('left_gripper_joint_vel', shape=(num_items, ), dtype='float32')
-                obs.create_dataset('right_gripper_joint_vel', shape=(num_items, ), dtype='float32')
-                act.create_dataset('left_arm_action', shape=(num_items, 6), dtype='float32')
-                act.create_dataset('right_arm_action', shape=(num_items, 6), dtype='float32')
-                act.create_dataset('left_gripper_action', shape=(num_items, ), dtype='float32')
-                act.create_dataset('right_gripper_action', shape=(num_items, ), dtype='float32')
+        # if len(reset_env_ids) > 0:
+        #     print(f"Writing data to hdf5 file")
+        #     with h5py.File(self.save_hdf5_file_name, 'w') as f:
+        #         f.attrs['sim'] = True
+        #         obs = f.create_group('observations')
+        #         act = f.create_group('actions')
+        #         num_items = len(self.data_dict['/observations/head_rgb'])
+        #         obs.create_dataset('head_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
+        #         obs.create_dataset('left_hand_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
+        #         obs.create_dataset('right_hand_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
+        #         obs.create_dataset('head_depth', shape=(num_items, 240, 320), dtype='float32')
+        #         obs.create_dataset('left_hand_depth', shape=(num_items, 240, 320), dtype='float32')
+        #         obs.create_dataset('right_hand_depth', shape=(num_items, 240, 320), dtype='float32')
+        #         obs.create_dataset('left_arm_joint_pos', shape=(num_items, 6), dtype='float32')
+        #         obs.create_dataset('right_arm_joint_pos', shape=(num_items, 6), dtype='float32')
+        #         obs.create_dataset('left_gripper_joint_pos', shape=(num_items, ), dtype='float32')
+        #         obs.create_dataset('right_gripper_joint_pos', shape=(num_items, ), dtype='float32')
+        #         obs.create_dataset('left_arm_joint_vel', shape=(num_items, 6), dtype='float32')
+        #         obs.create_dataset('right_arm_joint_vel', shape=(num_items, 6), dtype='float32')
+        #         obs.create_dataset('left_gripper_joint_vel', shape=(num_items, ), dtype='float32')
+        #         obs.create_dataset('right_gripper_joint_vel', shape=(num_items, ), dtype='float32')
+        #         act.create_dataset('left_arm_action', shape=(num_items, 6), dtype='float32')
+        #         act.create_dataset('right_arm_action', shape=(num_items, 6), dtype='float32')
+        #         act.create_dataset('left_gripper_action', shape=(num_items, ), dtype='float32')
+        #         act.create_dataset('right_gripper_action', shape=(num_items, ), dtype='float32')
                 
-                f.create_dataset('score', shape=(num_items,), dtype='int32')
-                f.create_dataset('current_time', shape=(num_items,), dtype='float32')
-                # f.create_dataset('time_cost', data=self.time_cost)
+        #         f.create_dataset('score', shape=(num_items,), dtype='int32')
+        #         f.create_dataset('current_time', shape=(num_items,), dtype='float32')
+        #         # f.create_dataset('time_cost', data=self.time_cost)
 
-                for name, value in self.data_dict.items():
-                    # print(f"Writing {name} to hdf5 file with value: {value}")
-                    f[name][...] = value
+        #         for name, value in self.data_dict.items():
+        #             # print(f"Writing {name} to hdf5 file with value: {value}")
+        #             f[name][...] = value
 
-            self.data_dict = {
-                '/observations/head_rgb': [],
-                '/observations/left_hand_rgb': [],
-                '/observations/right_hand_rgb': [],
-                '/observations/head_depth': [],
-                '/observations/left_hand_depth': [],
-                '/observations/right_hand_depth': [],
-                '/observations/left_arm_joint_pos': [],
-                '/observations/right_arm_joint_pos': [],
-                '/observations/left_gripper_joint_pos': [],
-                '/observations/right_gripper_joint_pos': [],
-                '/observations/left_arm_joint_vel': [],
-                '/observations/right_arm_joint_vel': [],
-                '/observations/left_gripper_joint_vel': [],
-                '/observations/right_gripper_joint_vel': [],
-                '/actions/left_arm_action': [],
-                '/actions/right_arm_action': [],
-                '/actions/left_gripper_action': [],
-                '/actions/right_gripper_action': [],
-                '/score': [],
-                '/current_time': [],
-            }
+        #     self.data_dict = {
+        #         '/observations/head_rgb': [],
+        #         '/observations/left_hand_rgb': [],
+        #         '/observations/right_hand_rgb': [],
+        #         '/observations/head_depth': [],
+        #         '/observations/left_hand_depth': [],
+        #         '/observations/right_hand_depth': [],
+        #         '/observations/left_arm_joint_pos': [],
+        #         '/observations/right_arm_joint_pos': [],
+        #         '/observations/left_gripper_joint_pos': [],
+        #         '/observations/right_gripper_joint_pos': [],
+        #         '/observations/left_arm_joint_vel': [],
+        #         '/observations/right_arm_joint_vel': [],
+        #         '/observations/left_gripper_joint_vel': [],
+        #         '/observations/right_gripper_joint_vel': [],
+        #         '/actions/left_arm_action': [],
+        #         '/actions/right_arm_action': [],
+        #         '/actions/left_gripper_action': [],
+        #         '/actions/right_gripper_action': [],
+        #         '/score': [],
+        #         '/current_time': [],
+        #     }
 
-            self._reset_idx(reset_env_ids)
-            # if sensors are added to the scene, make sure we render to reflect changes in reset
-            if self.sim.has_rtx_sensors() and self.cfg.num_rerenders_on_reset > 0:
-                for _ in range(self.cfg.num_rerenders_on_reset):
-                    self.sim.render()
+        #     self._reset_idx(reset_env_ids)
+        #     # if sensors are added to the scene, make sure we render to reflect changes in reset
+        #     if self.sim.has_rtx_sensors() and self.cfg.num_rerenders_on_reset > 0:
+        #         for _ in range(self.cfg.num_rerenders_on_reset):
+        #             self.sim.render()
 
         # post-step: step interval event
         if self.cfg.events:
