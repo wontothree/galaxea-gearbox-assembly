@@ -284,7 +284,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
     def _get_rewards(self) -> torch.Tensor:
         score, time_cost = self.evaluate_score()
-        print(f"score: {score}")
+        # print(f"score: {score}")
         reward_tensor = torch.full((self.num_envs,), score, device=self.device, dtype=torch.float32)
 
         return reward_tensor
@@ -450,9 +450,9 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
                 if not position_found:
                     # Max attempts reached, use the last generated position anyway with a warning
-                    print(f"[WARN] Could not find non-overlapping position for {obj_name} in env {env_idx} after {max_attempts} attempts.")
-                    print(f"       This may indicate the table area is too crowded. Consider reducing the number of objects")
-                    print(f"       or increasing the table area (x: [0.2, 0.5], y: [-0.3, 0.3]).")
+                    # print(f"[WARN] Could not find non-overlapping position for {obj_name} in env {env_idx} after {max_attempts} attempts.")
+                    # print(f"       This may indicate the table area is too crowded. Consider reducing the number of objects")
+                    # print(f"       or increasing the table area (x: [0.2, 0.5], y: [-0.3, 0.3]).")
                     root_state[env_idx, :3] = pos
                     placed_objects[env_idx].append((pos, obj_name))
 

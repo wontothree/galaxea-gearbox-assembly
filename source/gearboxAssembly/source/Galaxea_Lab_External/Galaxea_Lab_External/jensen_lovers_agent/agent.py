@@ -168,7 +168,7 @@ class GalaxeaGearboxAssemblyAgent:
         self.target_place_approach_pos_w = None
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [Function] pick_and_place2 ----------------------------------------------------------------------------------------- #
+        # [Function] pick_and_place2 ----------------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         self.pick_and_place2_fsm_state = PickAndPlaceState.INITIALIZATION
         self.pick_and_place2_fsm_timer = 0
@@ -303,48 +303,8 @@ class GalaxeaGearboxAssemblyAgent:
                 self.unmounted_sun_planetary_gear_quats_w.append(self.sun_planetary_gear_quats_w[sun_planetary_gear_idx])
         self.unmounted_pin_positions_w = [pin_positions_w[i] for i in range(len(pin_positions_w)) if not pin_occupied[i]]
 
-        # # -------------------------------------------------------------------------------------------------------------------------- #
-        # # Sorting ------------------------------------------------------------------------------------------------------------------ # 
-        # # -------------------------------------------------------------------------------------------------------------------------- #
-        # if len(self.unmounted_pin_positions_w) > 0 and len(self.unmounted_sun_planetary_gear_positions_w) > 0:
-        #     gear_positions_batch = torch.stack(self.unmounted_sun_planetary_gear_positions_w, dim=0).squeeze(2) # [N, num_envs, 3]
-        #     gear_quats_batch = torch.stack(self.unmounted_sun_planetary_gear_quats_w, dim=0).squeeze(2)         # [N, num_envs, 4]
-
-        #     gear_xy = gear_positions_batch[..., :2]
-        #     carrier_xy = self.planetary_carrier_pos_w[:, :2].unsqueeze(0) 
-            
-        #     gear_distances = torch.norm(gear_xy - carrier_xy, dim=2)
-            
-        #     sorted_gear_indices = torch.argsort(gear_distances, dim=0) # [N, num_envs]
-
-        #     new_gear_pos_list = []
-        #     new_gear_quat_list = []
-        #     for i in range(sorted_gear_indices.shape[0]): 
-        #         row_pos = torch.stack([gear_positions_batch[sorted_gear_indices[i, e], e] for e in range(num_envs)], dim=0)
-        #         row_quat = torch.stack([gear_quats_batch[sorted_gear_indices[i, e], e] for e in range(num_envs)], dim=0)
-        #         new_gear_pos_list.append(row_pos.unsqueeze(1)) # (num_envs, 1, 3) 유지
-        #         new_gear_quat_list.append(row_quat.unsqueeze(1))
-        #     self.unmounted_sun_planetary_gear_positions_w = new_gear_pos_list
-        #     self.unmounted_sun_planetary_gear_quats_w = new_gear_quat_list
-
-        #     pin_positions_w_tensor = torch.stack(self.unmounted_pin_positions_w, dim=0).squeeze(2) # [M, num_envs, 3]
-        #     reference_gear_pos = self.unmounted_sun_planetary_gear_positions_w[0].squeeze(1)       # [num_envs, 3]
-            
-        #     pin_xy = pin_positions_w_tensor[..., :2]
-        #     ref_gear_xy = reference_gear_pos[:, :2].unsqueeze(0)
-            
-        #     pin_distances = torch.norm(pin_xy - ref_gear_xy, dim=2) # [M, num_envs]
-        #     sorted_pin_indices = torch.argsort(pin_distances, dim=0)
-
-        #     new_pin_pos_list = []
-        #     for i in range(sorted_pin_indices.shape[0]): # M개 핀만큼
-        #         row_pin = torch.stack([pin_positions_w_tensor[sorted_pin_indices[i, e], e] for e in range(num_envs)], dim=0)
-        #         new_pin_pos_list.append(row_pin.unsqueeze(1))
-            
-        #     self.unmounted_pin_positions_w = new_pin_pos_list
-
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # Sorting (Base 기준 XY 평면 거리 먼 순서) ------------------------------------------------------------------------------------ # 
+        # Sorting ------------------------------------------------------------------------------------------------------------------ # 
         # -------------------------------------------------------------------------------------------------------------------------- #
         if len(self.unmounted_pin_positions_w) > 0 and len(self.unmounted_sun_planetary_gear_positions_w) > 0:
             num_envs = self.scene.num_envs
@@ -451,6 +411,9 @@ class GalaxeaGearboxAssemblyAgent:
         print(f"| planetary reducer            | {self.is_planetary_reducer_mounted} |")
         print("----------------------------------------")
 
+        score = self.num_mounted_planetary_gears + int(self.is_sun_gear_mounted) + int(self.is_ring_gear_mounted) + int(self.is_planetary_reducer_mounted)
+        print(f"score: {score}")
+
     def initialize_arm_controller(self, arm_name: str):
         """
         arm_name: left or right
@@ -549,7 +512,7 @@ class GalaxeaGearboxAssemblyAgent:
         return desired_arm_joint_position, desired_arm_joint_ids
 
     def pick_and_place(self,
-            object_name: str # planetary_gear, planetary_reducer
+            object_name: str # planetary_gear
         ) -> None:
         # Observe robot state and object state
         self.observe_robot_state()
@@ -884,7 +847,7 @@ class GalaxeaGearboxAssemblyAgent:
                 self.reset_pick_and_place()
 
     def pick_and_place2(self,
-            object_name: str # planetary_gear, sun_gear, ring_gear
+            object_name: str # sun_gear, ring_gear, planetary_reducer
         ) -> None:
         # Observe robot state and object state
         self.observe_robot_state()
@@ -1059,7 +1022,7 @@ class GalaxeaGearboxAssemblyAgent:
             # -------------------------------------------------------------------------------------------------------------------------- #
             # Planetary reducer -------------------------------------------------------------------------------------------------------- # 
             # -------------------------------------------------------------------------------------------------------------------------- #
-            else:
+            elif object_name == "planetary_reducer":
                 # pick
                 target_pick_pos_w = planetary_reducer_pos_w
                 target_pick_quat_w = planetary_reducer_quat_w
@@ -1151,6 +1114,11 @@ class GalaxeaGearboxAssemblyAgent:
             desired_left_gripper_position = torch.tensor([[0.035, 0.035]], device=self.device).repeat(num_envs, 1)
             desired_right_gripper_ids = self.right_gripper_entity_cfg.joint_ids
             desired_right_gripper_position = torch.tensor([[0.035, 0.035]], device=self.device).repeat(num_envs, 1)
+
+            if object_name == "planetary_reducer":
+                desired_left_gripper_position = torch.tensor([[0.01, 0.01]], device=self.device).repeat(num_envs, 1)
+                desired_right_gripper_position = torch.tensor([[0.01, 0.01]], device=self.device).repeat(num_envs, 1)
+
             self.joint_position_command = torch.cat(
                 [
                     desired_left_joint_position, 
