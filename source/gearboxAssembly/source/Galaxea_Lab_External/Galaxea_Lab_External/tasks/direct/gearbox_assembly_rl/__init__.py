@@ -13,7 +13,7 @@ gym.register(
 
 gym.register(
     id="Galaxea-Planetary-Gear-Assembly-RL-v0",
-    entry_point=f"{__name__}.planetary_gear_assembly_env:PlanetaryGearAssemblyEnv",
+    entry_point=f"{__name__}.planetary_gear_assembly_rl_env:PlanetaryGearAssemblyRLEnv",
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.planetary_gear_assembly_rl_env_cfg:PlanetaryGearAssemblyRLEnvCfg",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 from collections.abc import Sequence
 
+import carb
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation, AssetBase, RigidObject
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
@@ -19,6 +20,8 @@ import isaacsim.core.utils.torch as torch_utils
 
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import Camera
+from isaaclab.markers import VisualizationMarkers
+from isaaclab.markers.config import FRAME_MARKER_CFG
 
 from isaaclab.managers import SceneEntityCfg
 
@@ -103,8 +106,8 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         )
         self.context = Context(sim_utils.SimulationContext.instance(), self.agent)
         initial_state = InitializationState()
-        fsm = StateMachine(initial_state, self.context)
-        self.context.fsm = fsm
+        # fsm = StateMachine(initial_state, self.context)
+        # self.context.fsm = fsm
         # ------------------------------------------------------
 		
         self.left_arm_entity_cfg = SceneEntityCfg(
@@ -149,6 +152,9 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         
         # Initialize Diff IK related tensors
         self._init_diff_ik_tensors()
+        
+        # Initialize visualization markers for pins
+        self._setup_markers()
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -237,6 +243,46 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
             (self.num_envs, 1)
         )
 
+    def _setup_markers(self):
+        """Setup visualization markers for pin positions and left EEF."""
+        # Create markers for each pin
+        self.pin_markers = []
+        for pin_idx in range(len(self.pin_local_positions)):
+            pin_marker_cfg = FRAME_MARKER_CFG.copy()
+            pin_marker_cfg.markers["frame"].scale = (0.05, 0.05, 0.05)
+            marker = VisualizationMarkers(pin_marker_cfg.replace(prim_path=f"/Visuals/pin_{pin_idx}"))
+            self.pin_markers.append(marker)
+        
+        # Create marker for left arm end-effector
+        left_eef_marker_cfg = FRAME_MARKER_CFG.copy()
+        left_eef_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+        self.left_eef_marker = VisualizationMarkers(left_eef_marker_cfg.replace(prim_path="/Visuals/left_eef"))
+
+    def _update_markers(self):
+        """Update visualization markers for pin positions and left EEF."""
+        # Get pin world positions and orientations
+        pin_world_positions, pin_world_quats, _, _, _, _, _, _, _, _ = self.get_key_points()
+        
+        # Update markers for each pin
+        for pin_idx, (pin_pos, pin_quat) in enumerate(zip(pin_world_positions, pin_world_quats)):
+            self.pin_markers[pin_idx].visualize(pin_pos, pin_quat)
+        
+        # Update marker for left arm end-effector (world frame) with Z-axis offset
+        # Offset the EEF marker by 0.07m in the EEF's local Z direction
+        left_eef_pos_w = self.left_ee_pos_e + self.scene.env_origins
+        
+        # Local Z-axis offset (0.07m)
+        z_offset_local = torch.tensor([0.0, 0.0, 0.07], device=self.device).repeat(self.num_envs, 1)
+        
+        # Rotate the local offset to world frame using the EEF quaternion
+        # quaternion: (w, x, y, z)
+        z_offset_world = torch_utils.quat_rotate(self.left_ee_quat_w, z_offset_local)
+        
+        # Apply offset to EEF position
+        left_eef_pos_w_offset = left_eef_pos_w + z_offset_world
+        
+        self.left_eef_marker.visualize(left_eef_pos_w_offset, self.left_ee_quat_w)
+
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.prev_actions = self.actions.clone()
         self.actions = actions.clone()
@@ -245,27 +291,37 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
     def get_key_points(self):
         # Used member variables
         num_envs = self.scene.num_envs
+        num_pins = len(self.pin_local_positions)
 
         # Pin positions
-        # Calculate world positions of all pins
+        # Calculate world positions of all pins (vectorized)
         planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()
         planetary_carrier_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()
 
-        pin_world_positions = []
-        pin_world_quats = []
-        for pin_local_pos in self.pin_local_positions:
-            pin_quat_batch = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs, 1)
-            pin_local_pos_batch = pin_local_pos.repeat(num_envs, 1)
-
-            pin_world_quat, pin_world_pos = torch_utils.tf_combine(
-                planetary_carrier_quat, 
-                planetary_carrier_pos, 
-                pin_quat_batch, 
-                pin_local_pos_batch
-            )
-
-            pin_world_positions.append(pin_world_pos)
-            pin_world_quats.append(pin_world_quat)
+        # Stack all pin local positions: (num_pins, 3) -> (num_envs, num_pins, 3)
+        pin_local_pos_stacked = torch.stack(self.pin_local_positions, dim=0)  # (num_pins, 3)
+        pin_local_pos_batch = pin_local_pos_stacked.unsqueeze(0).expand(num_envs, -1, -1)  # (num_envs, num_pins, 3)
+        
+        # Identity quaternion for all pins: (num_envs, num_pins, 4)
+        pin_quat_batch = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).view(1, 1, 4).expand(num_envs, num_pins, -1)
+        
+        # Expand carrier pose for all pins: (num_envs, num_pins, 3/4)
+        carrier_pos_expanded = planetary_carrier_pos.unsqueeze(1).expand(-1, num_pins, -1)  # (num_envs, num_pins, 3)
+        carrier_quat_expanded = planetary_carrier_quat.unsqueeze(1).expand(-1, num_pins, -1)  # (num_envs, num_pins, 4)
+        
+        # Reshape for batch tf_combine: (num_envs * num_pins, 3/4)
+        pin_world_quat_flat, pin_world_pos_flat = torch_utils.tf_combine(
+            carrier_quat_expanded.reshape(-1, 4),
+            carrier_pos_expanded.reshape(-1, 3),
+            pin_quat_batch.reshape(-1, 4),
+            pin_local_pos_batch.reshape(-1, 3)
+        )
+        
+        # Reshape back and split into list: (num_envs, num_pins, 3/4) -> list of (num_envs, 3/4)
+        pin_world_pos_all = pin_world_pos_flat.view(num_envs, num_pins, 3)
+        pin_world_quat_all = pin_world_quat_flat.view(num_envs, num_pins, 4)
+        pin_world_positions = [pin_world_pos_all[:, i, :] for i in range(num_pins)]
+        pin_world_quats = [pin_world_quat_all[:, i, :] for i in range(num_pins)]
 
         gear_world_positions = []
         gear_world_quats = []
@@ -567,6 +623,7 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
 
+        # Randomize object positions (excluding sun_planetary_gear_4 which will be grasped)
         self.initial_root_state = self._randomize_object_positions([
             self.ring_gear, self.planetary_carrier,
             self.sun_planetary_gear_1, self.sun_planetary_gear_2,
@@ -577,40 +634,162 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
             'planetary_reducer'
         ])
 
-        # self.rule_policy.set_initial_root_state(self.initial_root_state)
-        # self.rule_policy.prepare_mounting_plan()
-
-        # joint_pos = self.robot.data.default_joint_pos[env_ids, self._joint_idx]
+        # Set robot to default pose first
         joint_pos = self.robot.data.default_joint_pos[env_ids][:, self._joint_idx]
-        # joint_pos[:, self._joint_idx] += sample_uniform(
-        #     self.cfg.initial_joint_angle_range[0] * math.pi,
-        #     self.cfg.initial_joint_angle_range[1] * math.pi,
-        #     joint_pos[:, self._joint_idx].shape,
-        #     joint_pos.device,
-        # )
-
-        # print(f"shape of joint_pos: {joint_pos.shape}")
-
-        # default_root_state = self.robot.data.default_root_state[env_ids]
-        # default_root_state[:, :3] += self.scene.env_origins[env_ids]
-
         default_root_state = self.robot.data.default_root_state[env_ids]
-        # print(f"default_root_state: {default_root_state}")
-
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
 
-        # print(f"default_root_state: {default_root_state}")
-        # print(f"self.scene.env_origins[env_ids]: {self.scene.env_origins[env_ids]}")
-
         self.joint_pos[env_ids] = joint_pos
-        # self.arm_joint_vel[env_ids] = arm_joint_vel
-
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
-        # self.robot.write_joint_state_to_sim(joint_pos, None, self._joint_idx, env_ids)
         self.robot.write_joint_position_to_sim(joint_pos, self._joint_idx, env_ids)
         self.robot.set_joint_position_target(joint_pos, self._joint_idx, env_ids)
-
-        # self.robot.write_joint_position_to_sim(torch.tensor([28.6479 / 180.0 * math.pi, -45.8366 / 180.0 * math.pi, 28.6479 / 180.0 * math.pi], device=self.device), self._torso_joint_idx, env_ids)
+        
+        # # Initialize gripper to open position
+        self._set_gripper_open(env_ids)
+        self._step_sim_no_action()
+        
+        # # Perform grasp initialization (Factory-style)
+        # self._initialize_grasp(env_ids)
+    
+    def _step_sim_no_action(self):
+        """Step the simulation without an action. Used for resets only."""
+        self.scene.write_data_to_sim()
+        self.sim.step(render=False)
+        self.scene.update(dt=self.physics_dt)
+        self._compute_ee_state_for_ik()
+    
+    def _set_gripper_open(self, env_ids):
+        """Set gripper to open position."""
+        gripper_open_pos = 0.04  # Maximum open position
+        self.ctrl_target_joint_pos[env_ids, self._left_gripper_dof_idx[0]] = gripper_open_pos
+        self.ctrl_target_joint_pos[env_ids, self._left_gripper_dof_idx[1]] = gripper_open_pos
+        self.robot.set_joint_position_target(
+            self.ctrl_target_joint_pos[env_ids][:, self._left_gripper_dof_idx],
+            self._left_gripper_dof_idx, env_ids
+        )
+    
+    def _set_gripper_close(self, env_ids):
+        """Set gripper to closed position."""
+        gripper_close_pos = 0.0  # Closed position
+        self.ctrl_target_joint_pos[env_ids, self._left_gripper_dof_idx[0]] = gripper_close_pos
+        self.ctrl_target_joint_pos[env_ids, self._left_gripper_dof_idx[1]] = gripper_close_pos
+        self.robot.set_joint_position_target(
+            self.ctrl_target_joint_pos[env_ids][:, self._left_gripper_dof_idx],
+            self._left_gripper_dof_idx, env_ids
+        )
+    
+    def _initialize_grasp(self, env_ids):
+        """Initialize gripper to grasp sun_planetary_gear_4 (Factory-style).
+        
+        Steps:
+        1. Disable gravity
+        2. Move gripper above held asset using IK
+        3. Move held asset to gripper position
+        4. Close gripper
+        5. Enable gravity
+        """
+        # 1. Disable gravity
+        physics_sim_view = sim_utils.SimulationContext.instance().physics_sim_view
+        physics_sim_view.set_gravity(carb.Float3(0.0, 0.0, 0.0))
+        
+        # 2. Get held asset (sun_planetary_gear_4) position
+        held_asset = self.sun_planetary_gear_4
+        held_pos_w = held_asset.data.root_pos_w.clone()  # World position
+        held_quat_w = held_asset.data.root_quat_w.clone()  # World quaternion
+        
+        # Calculate target EE position above the gear
+        # Offset in Z to position gripper above the gear
+        grasp_height_offset = 0.05  # Height offset for grasping
+        target_ee_pos_w = held_pos_w.clone()
+        target_ee_pos_w[:, 2] += grasp_height_offset
+        
+        # Target orientation: downward-facing
+        target_ee_quat = self._create_downward_quat(self.num_envs)
+        
+        # Move gripper to target position using IK
+        self._move_gripper_to_pose(env_ids, target_ee_pos_w, target_ee_quat)
+        
+        # 3. Move held asset to gripper position
+        # Get current fingertip position after IK movement
+        self._compute_ee_state_for_ik()
+        fingertip_pos_w = self.left_ee_pos_e + self.scene.env_origins
+        fingertip_quat_w = self.left_ee_quat_w
+        
+        # Calculate held asset position relative to fingertip
+        # The gear should be positioned below the fingertip
+        held_offset_local = torch.tensor([0.0, 0.0, -0.03], device=self.device).repeat(self.num_envs, 1)
+        held_offset_world = torch_utils.quat_rotate(fingertip_quat_w, held_offset_local)
+        
+        new_held_pos_w = fingertip_pos_w + held_offset_world
+        new_held_quat_w = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(self.num_envs, 1)
+        
+        # Write held asset to new position
+        held_state = held_asset.data.default_root_state.clone()
+        held_state[:, 0:3] = new_held_pos_w
+        held_state[:, 3:7] = new_held_quat_w
+        held_state[:, 7:] = 0.0  # Zero velocity
+        held_asset.write_root_pose_to_sim(held_state[:, 0:7])
+        held_asset.write_root_velocity_to_sim(held_state[:, 7:])
+        held_asset.reset()
+        
+        self._step_sim_no_action()
+        
+        # 4. Close gripper
+        grasp_time = 0.0
+        while grasp_time < 0.25:
+            self._set_gripper_close(env_ids)
+            self._step_sim_no_action()
+            grasp_time += self.sim.get_physics_dt()
+        
+        # 5. Enable gravity
+        physics_sim_view.set_gravity(carb.Float3(0.0, 0.0, -9.81))
+        
+        # Final simulation step
+        self._step_sim_no_action()
+        
+        # Reset action buffers
+        self.actions = torch.zeros_like(self.actions)
+        self.prev_actions = torch.zeros_like(self.actions)
+    
+    def _move_gripper_to_pose(self, env_ids, target_pos_w: torch.Tensor, target_quat_w: torch.Tensor):
+        """Move gripper to target pose using iterative IK."""
+        ik_time = 0.0
+        max_ik_time = 0.5  # Maximum time for IK convergence
+        
+        while ik_time < max_ik_time:
+            self._compute_ee_state_for_ik()
+            
+            # Convert target from world to body frame for IK
+            root_pose_w = self.robot.data.root_pose_w
+            target_pos_b, target_quat_b = subtract_frame_transforms(
+                root_pose_w[:, 0:3], root_pose_w[:, 3:7],
+                target_pos_w, target_quat_w
+            )
+            
+            # Set IK command
+            self.left_ik_commands[:, 0:3] = target_pos_b
+            self.left_ik_commands[:, 3:7] = target_quat_b
+            self.left_diff_ik_controller.set_command(self.left_ik_commands)
+            
+            # Get Jacobian and compute IK
+            left_jacobian = self.robot.root_physx_view.get_jacobians()[:, self.left_ee_jacobi_idx, :, self._left_arm_joint_idx]
+            joint_pos_des = self.left_diff_ik_controller.compute(
+                self.left_ee_pos_b, self.left_ee_quat_b, left_jacobian,
+                self.robot.data.joint_pos[:, self._left_arm_joint_idx]
+            )
+            
+            # Update joint targets
+            self.ctrl_target_joint_pos[:, self._left_arm_joint_idx] = joint_pos_des
+            self.robot.set_joint_position_target(self.ctrl_target_joint_pos)
+            
+            self._step_sim_no_action()
+            ik_time += self.physics_dt
+            
+            # Check convergence
+            current_pos_w = self.left_ee_pos_e + self.scene.env_origins
+            pos_error = torch.norm(current_pos_w - target_pos_w, dim=1).max()
+            if pos_error < 0.005:  # 5mm tolerance
+                break
 
     # ----------------------------------------------------------------------------------------------------
     
@@ -622,29 +801,34 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         # Compute current EE state for IK
         self._compute_ee_state_for_ik()
         
-        # Action space: 7-dim (left arm only)
-        # [0:3] - left arm position delta
-        # [3:6] - left arm rotation delta (axis-angle)
-        # [6:7] - left gripper
+        # Action space: 5-dim (constrained to downward-facing EEF)
+        # [0:3] - left arm position delta (x, y, z)
+        # [3:4] - yaw rotation only (pitch and roll are fixed)
+        # [4:5] - left gripper
         
         # --- Left Arm IK ---
         left_pos_actions = self.actions[:, 0:3] * self.pos_threshold
-        left_rot_actions = self.actions[:, 3:6] * self.rot_threshold
-        left_gripper_action = self.actions[:, 6:7]
+        left_yaw_action = self.actions[:, 3:4] * self.rot_threshold[:, 2:3]  # Use only Z component of rot_threshold
+        left_gripper_action = self.actions[:, 4:5]
         
         # Compute target position (current EE pos + delta)
         ctrl_target_left_ee_pos = self.left_ee_pos_e + left_pos_actions
         
-        # Convert rotation actions to quaternion and apply to current orientation
-        left_angle = torch.norm(left_rot_actions, p=2, dim=-1)
-        left_axis = left_rot_actions / (left_angle.unsqueeze(-1) + 1e-8)
-        left_rot_actions_quat = torch_utils.quat_from_angle_axis(left_angle, left_axis)
-        left_rot_actions_quat = torch.where(
-            left_angle.unsqueeze(-1).repeat(1, 4) > 1e-6,
-            left_rot_actions_quat,
+        # Convert yaw rotation action to quaternion and apply to current orientation
+        # Only apply yaw rotation, keeping roll and pitch fixed to face downward
+        yaw_angle = left_yaw_action.squeeze(-1)
+        yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device).repeat(self.num_envs, 1)
+        yaw_rot_quat = torch_utils.quat_from_angle_axis(yaw_angle, yaw_axis)
+        yaw_rot_quat = torch.where(
+            (yaw_angle.unsqueeze(-1).abs().repeat(1, 4)) > 1e-6,
+            yaw_rot_quat,
             torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(self.num_envs, 1),
         )
-        ctrl_target_left_ee_quat = torch_utils.quat_mul(left_rot_actions_quat, self.left_ee_quat_w)
+        # Apply yaw rotation to current orientation
+        ctrl_target_left_ee_quat_temp = torch_utils.quat_mul(yaw_rot_quat, self.left_ee_quat_w)
+        
+        # Constrain EEF orientation to always face downward (use helper function)
+        ctrl_target_left_ee_quat = self._constrain_quat_to_downward(ctrl_target_left_ee_quat_temp)
         
         # Convert target from world to body frame for IK
         root_pose_w = self.robot.data.root_pose_w
@@ -676,6 +860,9 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         
         # Apply control
         self.robot.set_joint_position_target(self.ctrl_target_joint_pos)
+        
+        # Update visualization markers
+        self._update_markers()
         
         # Update rigid objects
         sim_dt = self.sim.get_physics_dt()
@@ -728,6 +915,70 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         # Get joint states
         self.full_joint_pos = self.robot.data.joint_pos.clone()
         self.full_joint_vel = self.robot.data.joint_vel.clone()
+
+    def _create_downward_quat(self, batch_size: int, yaw: torch.Tensor = None) -> torch.Tensor:
+        """Create quaternion for downward-facing EEF orientation.
+        
+        Args:
+            batch_size: Number of quaternions to create
+            yaw: Optional yaw angles (batch_size,). If None, yaw=0 for all.
+            
+        Returns:
+            Quaternion tensor (batch_size, 4) with roll=π, pitch=0, yaw=specified
+        """
+        roll = torch.full((batch_size,), 3.14159, device=self.device)
+        pitch = torch.zeros(batch_size, device=self.device)
+        if yaw is None:
+            yaw = torch.zeros(batch_size, device=self.device)
+        return torch_utils.quat_from_euler_xyz(roll=roll, pitch=pitch, yaw=yaw)
+    
+    def _constrain_quat_to_downward(self, quat: torch.Tensor) -> torch.Tensor:
+        """Constrain quaternion to downward-facing orientation, preserving only yaw.
+        
+        Args:
+            quat: Input quaternion (batch_size, 4)
+            
+        Returns:
+            Constrained quaternion (batch_size, 4) with roll=π, pitch=0, yaw preserved
+        """
+        # Extract euler angles and keep only yaw
+        euler_xyz = torch.stack(torch_utils.get_euler_xyz(quat), dim=1)
+        return self._create_downward_quat(quat.shape[0], yaw=euler_xyz[:, 2])
+
+    def _enforce_ee_downward_orientation(self, env_ids):
+        """Enforce EEF orientation to face downward (Z-axis pointing down) at initialization."""
+        # Create quaternion representing downward-facing orientation
+        downward_quat = self._create_downward_quat(len(env_ids))
+        
+        # Compute IK to reach current EE position with downward orientation
+        self._compute_ee_state_for_ik()
+        current_ee_pos = self.left_ee_pos_e[env_ids] + self.scene.env_origins[env_ids]
+        
+        # Set IK command for downward orientation
+        root_pose_w = self.robot.data.root_pose_w[env_ids]
+        ctrl_ee_pos_b, ctrl_ee_quat_b = subtract_frame_transforms(
+            root_pose_w[:, 0:3], root_pose_w[:, 3:7],
+            current_ee_pos, downward_quat
+        )
+        
+        # Create temporary IK commands
+        temp_ik_commands = torch.zeros((len(env_ids), 7), device=self.device)
+        temp_ik_commands[:, 0:3] = ctrl_ee_pos_b
+        temp_ik_commands[:, 3:7] = ctrl_ee_quat_b
+        self.left_diff_ik_controller.set_command(temp_ik_commands)
+        
+        # Compute joint positions using IK
+        jacobians_all = self.robot.root_physx_view.get_jacobians()
+        left_jacobian = jacobians_all[env_ids, self.left_ee_jacobi_idx, :, :][:, :, self._left_arm_joint_idx]
+        joint_pos_des = self.left_diff_ik_controller.compute(
+            ctrl_ee_pos_b, ctrl_ee_quat_b, left_jacobian, 
+            self.robot.data.joint_pos[env_ids][:, self._left_arm_joint_idx]
+        )
+        
+        # Update joint targets (vectorized)
+        joint_idx_tensor = torch.tensor(self._left_arm_joint_idx, device=self.device)
+        self.ctrl_target_joint_pos[env_ids.unsqueeze(1), joint_idx_tensor] = joint_pos_des
+        self.robot.set_joint_position_target(self.ctrl_target_joint_pos[env_ids][:, self._left_arm_joint_idx], self._left_arm_joint_idx, env_ids)
 
     # -------------------------------------------------------------------------------------------------------------------------- #
     # Observation -------------------------------------------------------------------------------------------------------------- # 
@@ -1010,10 +1261,12 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         #)
 
         # Left arm only observation
+        # left_arm_joint_pos (6) + left_gripper_joint_pos (2) + prev_actions (5) = 13
         obs_tensors = torch.cat(
             (
-                self.left_arm_joint_pos,
-                self.left_gripper_joint_pos
+                self.left_arm_joint_pos,           # 6
+                self.left_gripper_joint_pos,       # 2
+                self.prev_actions,                 # 5
             ),
             dim=-1,
         )
