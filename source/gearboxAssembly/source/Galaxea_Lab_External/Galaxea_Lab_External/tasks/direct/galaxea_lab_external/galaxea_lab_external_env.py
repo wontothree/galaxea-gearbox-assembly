@@ -28,7 +28,7 @@ from Galaxea_Lab_External.robots import GalaxeaRulePolicy
 from isaaclab.sensors import Camera
 
 from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
-from ....jensen_lovers_agent.finite_state_machine import StateMachine, Context, InitializationState
+from ....jensen_lovers_agent.assembly_fsm import StateMachine, Context, InitializationState
 
 class GalaxeaLabExternalEnv(DirectRLEnv):
     cfg: GalaxeaLabExternalEnvCfg
@@ -146,8 +146,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         #     self.robot.set_joint_position_target(self.action, joint_ids=joint_ids)
 
         self.context.fsm.update()
-        joint_command = self.agent.joint_position_command # (num_envs, n_joints)
-        joint_ids = self.agent.joint_command_ids
+        joint_command = self.agent.joint_pos_command # (num_envs, n_joints)
+        joint_ids = self.agent.joint_pos_command_ids
         if joint_command is not None:
             self.robot.set_joint_position_target(
                 joint_command, 
