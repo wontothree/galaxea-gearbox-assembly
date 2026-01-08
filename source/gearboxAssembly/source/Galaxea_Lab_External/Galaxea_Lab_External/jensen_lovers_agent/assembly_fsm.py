@@ -2,16 +2,10 @@ from abc import ABC, abstractmethod
 
 from .agent import PickAndPlaceState
 
-# State's life cycle (enter -> update -> exit) interface
+# Interface of state in finite state machine
 class State(ABC):
-    def enter(self, context):
-        pass
-
     @abstractmethod
     def update(self, context):
-        pass
-
-    def exit(self, context):
         pass
 
 # State controller
@@ -19,12 +13,9 @@ class StateMachine:
     def __init__(self, initial_state, context):
         self.state = initial_state
         self.context = context
-        self.state.enter(self.context)
 
     def transition_to(self, next_state):
-        self.state.exit(self.context)
         self.state = next_state
-        self.state.enter(self.context)
 
     def update(self):
         self.state.update(self.context)
@@ -35,18 +26,6 @@ class Context:
         self.sim = sim
         self.agent = agent
         self.fsm = None            # object of StateMachine
-
-    # def determine_start_state(self):
-    #     if self.is_planetary_reducer_mounted:
-    #         return FinalizationState()
-    #     elif self.is_ring_gear_mounted:
-    #         return PlanetaryReducerMountingState()
-    #     elif self.is_sun_gear_mounted:
-    #         return RingGearMountingState()
-    #     elif self.is_all_planetary_gear_mounted:
-    #         return SunGearMountingState()
-    #     else:
-    #         return PlanetaryGearMountingState()
     
     @property
     def is_all_planetary_gear_mounted(self):
@@ -68,45 +47,27 @@ class Context:
 # [FSM Start State] Initialization ----------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
 class InitializationState(State):
-    def enter(self, context):
-        print("[FSM Start State] Initialization: enter")
-        # context.reset()
-
     def update(self, context):
         # [State Transition] Initialization -> Planetary Gear Mounting
         if context.fsm is not None:
             context.fsm.transition_to(PlanetaryGearMountingState())
 
-    def exit(self, context):
-        print("[FSM Start State] Initialization: exit")
-
 # -------------------------------------------------------------------------------------------------------------------------- #
 # [FSM Intermediate State] Planetary Gear Mounting ------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
 class PlanetaryGearMountingState(State):
-    def enter(self, context):
-        print("[FSM Intermediate State] Planetary Gear Mounting: enter")
-        context.agent.reset_pick_and_place()
-
     def update(self, context):
-        context.agent.pick_and_place(object_name="planetary_gear")
+        context.agent.pick_and_place()
 
         if context.agent.pick_and_place_fsm_state == PickAndPlaceState.FINALIZATION:
             if context.is_all_planetary_gear_mounted:
                 # [State Transition] Planetary Gear Mounting -> Sun Gear Mounting
                 context.fsm.transition_to(SunGearMountingState())
-        
-    def exit(self, context):
-        print("[FSM Intermediate State] Planetary Gear Mounting: exit")
 
 # -------------------------------------------------------------------------------------------------------------------------- #
 # [FSM Intermediate State] Sun Gear Mounting ------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
 class SunGearMountingState(State):
-    def enter(self, context):
-        print("[FSM Intermediate State] Sun Gear Mouting: enter")
-        context.agent.reset_pick_and_place2()
-    
     def update(self, context):
         context.agent.pick_and_place2(object_name="sun_gear")
 
@@ -115,36 +76,22 @@ class SunGearMountingState(State):
                 # [State Transition] Sun Gear Mounting -> Ring Gear Mounting
                 context.fsm.transition_to(PlanetaryReducerMountingState())
 
-    def exit(self, context):
-        print("[FSM Intermediate State] Sun Gear Mounting: exit")
-
 # -------------------------------------------------------------------------------------------------------------------------- #
 # [FSM Intermediate State] Ring Gear Mounting ------------------------------------------------------------------------------ #
 # -------------------------------------------------------------------------------------------------------------------------- #
-class RingGearMountingState(State):
-    def enter(self, context):
-        print("[FSM Intermediate State] Ring Gear Mouting: enter")
-        context.agent.reset_pick_and_place2()
-    
-    def update(self, context):
-        context.agent.pick_and_place2(object_name="ring_gear")
+# class RingGearMountingState(State):
+#     def update(self, context):
+#         context.agent.pick_and_place2(object_name="ring_gear")
 
-        if context.agent.pick_and_place2_fsm_state == PickAndPlaceState.FINALIZATION:
-            if context.is_ring_gear_mounted:
-                # [State Transition] Ring Gear Mounting -> Planetary Reducer Mounting
-                context.fsm.transition_to(PlanetaryReducerMountingState())
-
-    def exit(self, context):
-        print("[FSM Intermediate State] Ring Gear Mounting: exit")
+#         if context.agent.pick_and_place2_fsm_state == PickAndPlaceState.FINALIZATION:
+#             if context.is_ring_gear_mounted:
+#                 # [State Transition] Ring Gear Mounting -> Planetary Reducer Mounting
+#                 context.fsm.transition_to(PlanetaryReducerMountingState())
 
 # -------------------------------------------------------------------------------------------------------------------------- #
 # [FSM Intermediate State] Planetary Reducer Mounting ---------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
 class PlanetaryReducerMountingState(State):
-    def enter(self, context):
-        print("[FSM Intermediate State] Planetary Reducer Mouting: enter")
-        context.agent.reset_pick_and_place2()
-    
     def update(self, context):
         context.agent.pick_and_place2(object_name="planetary_reducer")
 
@@ -153,15 +100,9 @@ class PlanetaryReducerMountingState(State):
                 # [State Transition] Planetary Reducer Mounting -> Finalization
                 context.fsm.transition_to(FinalizationState())
 
-    def exit(self, context):
-        print("[FSM Intermediate State] Planetary Reducer Mounting: exit")
-
 # -------------------------------------------------------------------------------------------------------------------------- #
 # [FSM End State] Finalization --------------------------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
 class FinalizationState(State):
-    def enter(self, context):
-        print("[FSM Start State] FINALIZATION: enter")
-
     def update(self, context):
         pass
