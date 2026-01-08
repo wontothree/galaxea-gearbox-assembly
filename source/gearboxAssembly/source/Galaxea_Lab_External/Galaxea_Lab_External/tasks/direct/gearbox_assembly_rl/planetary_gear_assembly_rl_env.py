@@ -161,11 +161,6 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         # self.table = Articulation(self.cfg.table_cfg)
         # self.cfg.table_cfg.func("/World/envs/env_.*/Table", self.cfg.table_cfg)
 
-        # Disable cameras for now
-        # self.head_camera = Camera(self.cfg.head_camera_cfg)
-        # self.left_hand_camera = Camera(self.cfg.left_hand_camera_cfg)
-        # self.right_hand_camera = Camera(self.cfg.right_hand_camera_cfg)
-
         self.table = sim_utils.spawn_from_usd("/World/envs/env_.*/Table", self.cfg.table_cfg.spawn,
             translation=self.cfg.table_cfg.init_state.pos, 
             orientation=self.cfg.table_cfg.init_state.rot
@@ -244,7 +239,7 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         )
 
     def _setup_markers(self):
-        """Setup visualization markers for pin positions and left EEF."""
+        """Setup visualization markers for pin positions, left EEF, and gear4."""
         # Create markers for each pin
         self.pin_markers = []
         for pin_idx in range(len(self.pin_local_positions)):
@@ -257,6 +252,11 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         left_eef_marker_cfg = FRAME_MARKER_CFG.copy()
         left_eef_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
         self.left_eef_marker = VisualizationMarkers(left_eef_marker_cfg.replace(prim_path="/Visuals/left_eef"))
+        
+        # Create marker for sun_planetary_gear_4 (held gear)
+        gear4_marker_cfg = FRAME_MARKER_CFG.copy()
+        gear4_marker_cfg.markers["frame"].scale = (0.08, 0.08, 0.08)
+        self.gear4_marker = VisualizationMarkers(gear4_marker_cfg.replace(prim_path="/Visuals/gear4"))
 
     def _update_markers(self):
         """Update visualization markers for pin positions and left EEF."""
@@ -282,6 +282,11 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         left_eef_pos_w_offset = left_eef_pos_w + z_offset_world
         
         self.left_eef_marker.visualize(left_eef_pos_w_offset, self.left_ee_quat_w)
+        
+        # Update marker for sun_planetary_gear_4
+        gear4_pos_w = self.sun_planetary_gear_4.data.root_pos_w
+        gear4_quat_w = self.sun_planetary_gear_4.data.root_quat_w
+        self.gear4_marker.visualize(gear4_pos_w, gear4_quat_w)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.prev_actions = self.actions.clone()
@@ -649,7 +654,7 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         self._step_sim_no_action()
         
         # # Perform grasp initialization (Factory-style)
-        # self._initialize_grasp(env_ids)
+        self._initialize_grasp(env_ids)
     
     def _step_sim_no_action(self):
         """Step the simulation without an action. Used for resets only."""
@@ -699,7 +704,7 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         
         # Calculate target EE position above the gear
         # Offset in Z to position gripper above the gear
-        grasp_height_offset = 0.05  # Height offset for grasping
+        grasp_height_offset = 0.15  # Height offset for grasping
         target_ee_pos_w = held_pos_w.clone()
         target_ee_pos_w[:, 2] += grasp_height_offset
         
@@ -717,7 +722,7 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         
         # Calculate held asset position relative to fingertip
         # The gear should be positioned below the fingertip
-        held_offset_local = torch.tensor([0.0, 0.0, -0.03], device=self.device).repeat(self.num_envs, 1)
+        held_offset_local = torch.tensor([0.0, 0.0, 0.07], device=self.device).repeat(self.num_envs, 1)
         held_offset_world = torch_utils.quat_rotate(fingertip_quat_w, held_offset_local)
         
         new_held_pos_w = fingertip_pos_w + held_offset_world
@@ -801,15 +806,13 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         # Compute current EE state for IK
         self._compute_ee_state_for_ik()
         
-        # Action space: 5-dim (constrained to downward-facing EEF)
+        # Action space: 4-dim (constrained to downward-facing EEF, gripper always closed)
         # [0:3] - left arm position delta (x, y, z)
         # [3:4] - yaw rotation only (pitch and roll are fixed)
-        # [4:5] - left gripper
         
         # --- Left Arm IK ---
         left_pos_actions = self.actions[:, 0:3] * self.pos_threshold
         left_yaw_action = self.actions[:, 3:4] * self.rot_threshold[:, 2:3]  # Use only Z component of rot_threshold
-        left_gripper_action = self.actions[:, 4:5]
         
         # Compute target position (current EE pos + delta)
         ctrl_target_left_ee_pos = self.left_ee_pos_e + left_pos_actions
@@ -853,10 +856,9 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         # --- Set joint position targets ---
         self.ctrl_target_joint_pos[:, self._left_arm_joint_idx] = self.left_joint_pos_des
         
-        # Gripper control (scale from [-1, 1] to [0, 0.04])
-        left_gripper_pos = (left_gripper_action.squeeze(-1) + 1.0) * 0.02  # [0, 0.04]
-        self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[0]] = left_gripper_pos
-        self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[1]] = left_gripper_pos
+        # Gripper control - always closed at 0.0 (Factory-style)
+        self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[0]] = 0.0
+        self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[1]] = 0.0
         
         # Apply control
         self.robot.set_joint_position_target(self.ctrl_target_joint_pos)
@@ -868,22 +870,6 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         sim_dt = self.sim.get_physics_dt()
         for obj_name, obj in self.obj_dict.items():
             obj.update(sim_dt)
-    
-    # def _apply_action_fsm(self) -> None:
-    #     """Original FSM-based action application (deprecated)."""
-    #     self.context.fsm.update()
-    #     joint_command = self.agent.joint_position_command # (num_envs, n_joints)
-    #     joint_ids = self.agent.joint_command_ids
-    #     if joint_command is not None:
-    #         self.robot.set_joint_position_target(
-    #             joint_command, 
-    #             joint_ids=joint_ids,
-    #             env_ids=self.robot._ALL_INDICES
-    #         )
-    #
-    #     sim_dt = self.sim.get_physics_dt()
-    #     for obj_name, obj in self.obj_dict.items():
-    #         obj.update(sim_dt)
     
     def _compute_ee_state_for_ik(self):
         """Compute EE states in both world and body frames for IK."""
@@ -1195,70 +1181,8 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
                 orientation_error < th["orientation"]):
                 self.is_planetary_reducer_mounted = True
 
-    def _get_obs_state_dict(self):
-        """Populate dictionaries for the policy and critic."""
-        # Used member variables
-        # prev_actions = None
-        # gear_pos_e   = self.agent.target_pick_pos_w - self.scene.env_origins
-        # gear_quat_w  = self.agent.target_pick_quat_w
-        # pin_pos_e    = self.agent.target_place_pos_w - self.scene.env_origins
-
-        # # Decide arm
-        # arm_name = self.agent.active_arm_name
-        # if arm_name == "left":
-        #     ee_pos_e      = self.left_ee_pos_e
-        #     ee_quat_w     = self.left_ee_quat_w
-        #     ee_linevel_w  = self.left_ee_linvel_w
-        #     ee_angvel_w   = self.left_ee_angvel_w
-        #     arm_joint_pos = self.left_arm_joint_pos
-        # elif arm_name == "right":
-        #     ee_pos_e      = self.right_ee_pos_e
-        #     ee_quat_w     = self.right_ee_quat_w
-        #     ee_linevel_w  = self.right_ee_linvel_w
-        #     ee_angvel_w   = self.right_ee_angvel_w
-        #     arm_joint_pos = self.right_arm_joint_pos
-
-        # obs_dict = {
-        #     "fingertip_pos": ee_pos_e,
-        #     "fingertip_pos_rel_fixed": ee_pos_e - pin_pos_e,
-        #     "fingertip_quat": ee_quat_w,
-        #     "ee_linvel": ee_linevel_w,
-        #     "ee_angvel": ee_angvel_w,
-        #     "prev_actions": prev_actions
-        # }
-        # state_dict = {
-        #     "fingertip_pos": ee_pos_e,
-        #     "fingertip_pos_rel_fixed": ee_pos_e - pin_pos_e,
-        #     "fingertip_quat": ee_quat_w,
-        #     "ee_linvel": ee_linevel_w,
-        #     "ee_angvel": ee_angvel_w,
-        #     "joint_ps": arm_joint_pos,
-        #     "held_pos": gear_pos_e,
-        #     "held_pos_rel_fixed": gear_pos_e - pin_pos_e,
-        #     "held_quat": gear_quat_w,
-        #     "fixed_pos": pin_pos_e,
-        #     "fixed_quat": 11,
-        #     "task_prop_gains": 12,
-        #     "pos_threshold": 13,
-        #     "rot_threshold": 14,
-        #     "prev_actions": prev_actions
-        # }
-
-        obs_dict = {}
-        state_dict = {}
-        return obs_dict, state_dict
-
     def _get_observations(self) -> dict:
         """Get actor/critic inputs using left arm only."""
-        obs_dict, state_dict = self._get_obs_state_dict()
-        # obs_tensors = gearbox_assembly_utils.collapse_obs_dict(
-        #    obs_dict=obs_dict,
-        #    obs_order=self.cfg.obs_order + ["prev_actions"]
-        #)
-        #state_tensors = gearbox_assembly_utils.collapse_obs_dict(
-        #    obs_dict=state_dict,
-        #    obs_order=self.cfg.state_order + ["prev_actions"]
-        #)
 
         # Left arm only observation
         # left_arm_joint_pos (6) + left_gripper_joint_pos (2) + prev_actions (5) = 13
@@ -1277,33 +1201,159 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
     # -------------------------------------------------------------------------------------------------------------------------- #
     # Reward ------------------------------------------------------------------------------------------------------------------- # 
     # -------------------------------------------------------------------------------------------------------------------------- #
+    def _squashing_fn(self, x: torch.Tensor, a: float, b: float) -> torch.Tensor:
+        """Squashing function for multi-scale keypoint rewards.
+        
+        Returns reward that decreases as distance x increases.
+        Different (a, b) parameters create different reward scales:
+        - Low a, high b: gentle slope for encouraging approach from far
+        - High a, low b: steep slope for fine alignment
+        
+        Args:
+            x: Distance tensor
+            a: Steepness parameter
+            b: Offset parameter
+            
+        Returns:
+            Reward tensor in range (0, 1/(2+b)]
+        """
+        return 1.0 / (torch.exp(a * x) + b + torch.exp(-a * x))
+    
+    def _get_keypoint_offsets(self, num_keypoints: int) -> torch.Tensor:
+        """Get keypoint offsets for reward computation.
+        
+        Creates offsets arranged in a pattern around the object center.
+        """
+        if num_keypoints == 1:
+            return torch.zeros((1, 3), device=self.device)
+        elif num_keypoints == 4:
+            # 4 corners pattern
+            offsets = torch.tensor([
+                [1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ], device=self.device)
+            return offsets
+        elif num_keypoints == 8:
+            # 8 corners of a cube
+            offsets = torch.tensor([
+                [1.0, 1.0, 1.0],
+                [1.0, 1.0, -1.0],
+                [1.0, -1.0, 1.0],
+                [1.0, -1.0, -1.0],
+                [-1.0, 1.0, 1.0],
+                [-1.0, 1.0, -1.0],
+                [-1.0, -1.0, 1.0],
+                [-1.0, -1.0, -1.0],
+            ], device=self.device)
+            return offsets
+        else:
+            return torch.zeros((num_keypoints, 3), device=self.device)
+    
+    def _get_curr_successes(self, success_threshold: float) -> torch.Tensor:
+        """Check if gear4 is successfully placed on the target pin (first unmounted pin)."""
+        # Get gear4 position
+        gear4_pos = self.sun_planetary_gear_4.data.root_pos_w - self.scene.env_origins
+        
+        # Use first unmounted pin as fixed target
+        if len(self.unmounted_pin_positions) > 0:
+            target_pin_pos = self.unmounted_pin_positions[0].squeeze(1)  # (num_envs, 3)
+        else:
+            # All pins are occupied - use first pin as fallback
+            pin_world_positions, _, _, _, _, _, _, _, _, _ = self.get_key_points()
+            target_pin_pos = pin_world_positions[0] - self.scene.env_origins
+        
+        # Compute XY distance to target pin
+        dist = torch.norm(gear4_pos[:, :2] - target_pin_pos[:, :2], dim=1)
+        
+        return dist < success_threshold
+    
     def _get_rew_dict(self) -> tuple[dict[str, torch.Tensor], dict[str, float]]:
-        """Compute reward terms at current timestep."""
-        rew_dict, rew_scales = {}, {}
-
+        """Compute reward terms at current timestep (Factory-style)."""
+        # Get gear4 (held asset) position
+        gear4_pos = self.sun_planetary_gear_4.data.root_pos_w - self.scene.env_origins
+        gear4_quat = self.sun_planetary_gear_4.data.root_quat_w
+        
+        # Get target pin (first unmounted pin - fixed target)
+        if len(self.unmounted_pin_positions) > 0:
+            target_pin_pos = self.unmounted_pin_positions[0].squeeze(1)  # (num_envs, 3)
+            # Get corresponding quaternion from pin_quats
+            pin_world_positions, pin_world_quats, _, _, _, _, _, _, _, _ = self.get_key_points()
+            # Find which pin this is by matching position
+            for idx, pin_pos in enumerate(pin_world_positions):
+                pin_pos_local = pin_pos - self.scene.env_origins
+                # Use first pin's quat as approximation (all pins have similar orientation)
+                target_pin_quat = pin_world_quats[0]
+                break
+        else:
+            # All pins are occupied - use first pin as fallback
+            pin_world_positions, pin_world_quats, _, _, _, _, _, _, _, _ = self.get_key_points()
+            target_pin_pos = pin_world_positions[0] - self.scene.env_origins
+            target_pin_quat = pin_world_quats[0]
+        
+        # Compute keypoints on gear4 and target positions
+        num_keypoints = self.cfg.num_keypoints
+        keypoint_offsets = self._get_keypoint_offsets(num_keypoints) * self.cfg.keypoint_scale
+        
+        keypoints_held = torch.zeros((self.num_envs, num_keypoints, 3), device=self.device)
+        keypoints_target = torch.zeros((self.num_envs, num_keypoints, 3), device=self.device)
+        
+        for idx, offset in enumerate(keypoint_offsets):
+            # Transform offset by gear4 pose
+            offset_batch = offset.unsqueeze(0).repeat(self.num_envs, 1)
+            rotated_offset_held = torch_utils.quat_rotate(gear4_quat, offset_batch)
+            keypoints_held[:, idx, :] = gear4_pos + rotated_offset_held
+            
+            # Transform offset by target pin pose
+            rotated_offset_target = torch_utils.quat_rotate(target_pin_quat, offset_batch)
+            keypoints_target[:, idx, :] = target_pin_pos + rotated_offset_target
+        
+        # Compute mean keypoint distance
+        keypoint_dist = torch.norm(keypoints_held - keypoints_target, p=2, dim=-1).mean(dim=-1)
+        
+        # Get coefficients from config
+        a0, b0 = self.cfg.keypoint_coef_baseline
+        a1, b1 = self.cfg.keypoint_coef_coarse
+        a2, b2 = self.cfg.keypoint_coef_fine
+        
+        # Action penalties
+        action_penalty_ee = torch.norm(self.actions, p=2, dim=-1)
+        action_grad_penalty = torch.norm(self.actions - self.prev_actions, p=2, dim=-1)
+        
+        # Success checks
+        curr_engaged = self._get_curr_successes(success_threshold=self.cfg.engage_threshold)
+        curr_success = self._get_curr_successes(success_threshold=self.cfg.success_threshold)
+        
         rew_dict = {
-            "kp_baseline"        : 1.0,
-            "kp_coarse"          : 1.0,
-            "kp_fine"            : 1.0,
-            "action_penalty_ee"  : 1,
-            "action_grad_penalty": 1,
-            "curr_engaged"       : 1.0,
-            "curr_success"       : 1.0
+            "kp_baseline": self._squashing_fn(keypoint_dist, a0, b0),
+            "kp_coarse": self._squashing_fn(keypoint_dist, a1, b1),
+            "kp_fine": self._squashing_fn(keypoint_dist, a2, b2),
+            "action_penalty_ee": action_penalty_ee,
+            "action_grad_penalty": action_grad_penalty,
+            "curr_engaged": curr_engaged.float(),
+            "curr_success": curr_success.float(),
         }
+        
         rew_scales = {
-            "kp_baseline"        : 1.0,
-            "kp_coarse"          : 1.0,
-            "kp_fine"            : 1.0,
-            "action_penalty_ee"  : 0.0,
-            "action_grad_penalty": 0.0,
-            "curr_engaged"       : 1.0,
-            "curr_success"       : 1.0
+            "kp_baseline": 1.0,
+            "kp_coarse": 1.0,
+            "kp_fine": 1.0,
+            "action_penalty_ee": -self.cfg.action_penalty_ee_scale,
+            "action_grad_penalty": -self.cfg.action_grad_penalty_scale,
+            "curr_engaged": 1.0,
+            "curr_success": 1.0,
         }
 
         return rew_dict, rew_scales
     
     def _get_rewards(self) -> torch.Tensor:
-        scores_batch, _ = self.evaluate_score()
-        reward_tensor = scores_batch.clone()
-
-        return reward_tensor
+        """Compute total reward from reward dictionary."""
+        rew_dict, rew_scales = self._get_rew_dict()
+        
+        # Sum all reward components with their scales
+        rew_buf = torch.zeros((self.num_envs,), device=self.device)
+        for rew_name, rew in rew_dict.items():
+            rew_buf += rew * rew_scales[rew_name]
+        
+        return rew_buf
