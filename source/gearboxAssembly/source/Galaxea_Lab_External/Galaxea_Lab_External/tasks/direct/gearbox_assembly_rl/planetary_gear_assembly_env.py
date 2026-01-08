@@ -26,7 +26,7 @@ from isaaclab.managers import SceneEntityCfg
 from .planetary_gear_assembly_env_cfg import PlanetaryGearAssemblyEnvCfg
 from . import gearbox_assembly_utils
 from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
-from ....jensen_lovers_agent.finite_state_machine import StateMachine, Context, InitializationState
+from ....jensen_lovers_agent.assembly_fsm import StateMachine, Context, InitializationState
 
 class PlanetaryGearAssemblyEnv(DirectRLEnv):
     cfg: PlanetaryGearAssemblyEnvCfg
