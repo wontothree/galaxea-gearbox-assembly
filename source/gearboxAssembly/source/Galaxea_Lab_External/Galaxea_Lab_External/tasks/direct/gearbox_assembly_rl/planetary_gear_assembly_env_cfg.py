@@ -27,9 +27,9 @@ class PlanetaryGearAssemblyEnvCfg(GearboxAssemblyBaseEnvCfg):
     
     def __post_init__(self):
         # Override values from GearboxAssemblyBaseEnvCfg
-        self.sim_dt = 0.01
-        self.decimation = 2
-        self.episode_length_s = 60.0
+        self.sim_dt = 1/120
+        self.decimation = 8
+        self.episode_length_s = 20.0
         
         # spaces definition (6DOF robot arm)
         # action: 3 position + 1 yaw rotation = 4 (gripper always closed)
