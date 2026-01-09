@@ -1,6 +1,6 @@
-from abc import ABC, abstractmethod
+from .dual_arm_pick_and_place_fsm import PickAndPlaceState
 
-from .agent import PickAndPlaceState
+from abc import ABC, abstractmethod
 
 # Interface of state in finite state machine
 class State(ABC):
@@ -48,18 +48,21 @@ class Context:
 # -------------------------------------------------------------------------------------------------------------------------- #
 class InitializationState(State):
     def update(self, context):
+        print("[High Level FSM State] INITIALIZATION")
+
         # [State Transition] Initialization -> Planetary Gear Mounting
-        if context.fsm is not None:
-            context.fsm.transition_to(PlanetaryGearMountingState())
+        context.fsm.transition_to(PlanetaryGearMountingState())
 
 # -------------------------------------------------------------------------------------------------------------------------- #
 # [FSM Intermediate State] Planetary Gear Mounting ------------------------------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------------------------------- #
 class PlanetaryGearMountingState(State):
     def update(self, context):
-        context.agent.pick_and_place()
+        print("[High Level FSM State] Planetary Gear Mounting")
 
-        if context.agent.pick_and_place_fsm_state == PickAndPlaceState.FINALIZATION:
+        context.agent.pick_and_place(target_object_name="planetary_gear")
+
+        if context.agent.state == PickAndPlaceState.FINALIZATION:
             if context.is_all_planetary_gear_mounted:
                 # [State Transition] Planetary Gear Mounting -> Sun Gear Mounting
                 context.fsm.transition_to(SunGearMountingState())
@@ -69,9 +72,11 @@ class PlanetaryGearMountingState(State):
 # -------------------------------------------------------------------------------------------------------------------------- #
 class SunGearMountingState(State):
     def update(self, context):
-        context.agent.pick_and_place2(object_name="sun_gear")
+        print("[High Level FSM State] Sun Gear Mounting")
 
-        if context.agent.pick_and_place2_fsm_state == PickAndPlaceState.FINALIZATION:
+        context.agent.pick_and_place(target_object_name="sun_gear")
+
+        if context.agent.state == PickAndPlaceState.FINALIZATION:
             if context.is_sun_gear_mounted:
                 # [State Transition] Sun Gear Mounting -> Ring Gear Mounting
                 context.fsm.transition_to(PlanetaryReducerMountingState())
@@ -93,9 +98,11 @@ class SunGearMountingState(State):
 # -------------------------------------------------------------------------------------------------------------------------- #
 class PlanetaryReducerMountingState(State):
     def update(self, context):
-        context.agent.pick_and_place2(object_name="planetary_reducer")
+        print("[High Level FSM State] Planetary Reducer Mounting")
 
-        if context.agent.pick_and_place2_fsm_state == PickAndPlaceState.FINALIZATION:
+        context.agent.pick_and_place(target_object_name="planetary_reducer")
+
+        if context.agent.state == PickAndPlaceState.FINALIZATION:
             if context.is_planetary_reducer_mounted:
                 # [State Transition] Planetary Reducer Mounting -> Finalization
                 context.fsm.transition_to(FinalizationState())
@@ -105,4 +112,6 @@ class PlanetaryReducerMountingState(State):
 # -------------------------------------------------------------------------------------------------------------------------- #
 class FinalizationState(State):
     def update(self, context):
+        print("[High Level FSM State] FINALIZATION")
+
         pass
