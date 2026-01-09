@@ -11,7 +11,6 @@ from pathlib import Path
 
 from utils import ContainerInterface, x11_utils
 
-
 def parse_cli_args() -> argparse.Namespace:
     """Parse command line arguments.
 
