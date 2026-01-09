@@ -5,13 +5,11 @@ from collections.abc import Sequence
 
 import carb
 import isaaclab.sim as sim_utils
-from isaaclab.assets import Articulation, AssetBase, RigidObject
+from isaaclab.assets import Articulation, RigidObject
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import sample_uniform, subtract_frame_transforms
+from isaaclab.utils.math import subtract_frame_transforms
 
-
-from pxr import Usd, Sdf, UsdPhysics, UsdGeom
-from isaaclab.sim.spawners.materials import physics_materials, physics_materials_cfg
+from isaaclab.sim.spawners.materials import physics_materials_cfg
 from isaaclab.sim.spawners.materials import spawn_rigid_body_material
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.controllers import DifferentialIKController, DifferentialIKControllerCfg
@@ -19,18 +17,11 @@ from isaaclab.controllers import DifferentialIKController, DifferentialIKControl
 import isaacsim.core.utils.torch as torch_utils
 
 from isaaclab.envs import DirectRLEnv
-from isaaclab.sensors import Camera
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.markers.config import FRAME_MARKER_CFG
 
-from isaaclab.managers import SceneEntityCfg
-
-# from Galaxea_Lab_External.robots import GalaxeaRulePolicy
-
 from .planetary_gear_assembly_rl_env_cfg import PlanetaryGearAssemblyRLEnvCfg
 from . import gearbox_assembly_utils
-from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
-from ....jensen_lovers_agent.finite_state_machine import StateMachine, Context, InitializationState
 
 class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
     cfg: PlanetaryGearAssemblyRLEnvCfg
@@ -67,79 +58,28 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         # self.rule_policy = GalaxeaRulePolicy(sim_utils.SimulationContext.instance(), self.scene, self.obj_dict)
         self.initial_root_state = None
 
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # [Function] _compute_intermediate_values ---------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        self.left_ee_pos_e       = None
-        self.left_ee_quat_w      = None
-        self.left_ee_linvel_w    = None
-        self.left_ee_angvel_w    = None
-        self.right_ee_pos_e      = None
-        self.right_ee_quat_w     = None
-        self.right_ee_linvel_w   = None
-        self.right_ee_angvel_w   = None
-        # self.left_arm_joint_pos  = None   # for preventing error
-        # self.right_arm_joint_pos = None
-        self.sun_planetary_gear_positions           = None
-        self.sun_planetary_gear_quats               = None
-        self.ring_gear_pos                          = None
-        self.ring_gear_quat                         = None
-        self.planetary_reducer_pos                  = None
-        self.planetary_reducer_quat                 = None
-        self.planetary_carrier_pos                  = None
-        self.planetary_carrier_quat                 = None
-        self.pin_positions                          = None
-        self.pin_quats                              = None
-        self.num_mounted_planetary_gears            = 0
-        self.is_sun_gear_mounted                    = False
-        self.is_ring_gear_mounted                   = False
-        self.is_planetary_reducer_mounted           = False
-        self.unmounted_sun_planetary_gear_positions = []
-        self.unmounted_sun_planetary_gear_quats     = []
-        self.unmounted_pin_positions                = []
+        # Intermediate values for reward computation
+        self.unmounted_pin_positions = []
 
-        # ------------------------------------------------------
-        self.agent = GalaxeaGearboxAssemblyAgent(
-            sim=sim_utils.SimulationContext.instance(),
-            scene=self.scene,
-            obj_dict=self.obj_dict
-        )
-        self.context = Context(sim_utils.SimulationContext.instance(), self.agent)
-        initial_state = InitializationState()
-        # fsm = StateMachine(initial_state, self.context)
-        # self.context.fsm = fsm
-        # ------------------------------------------------------
-		
+        # Left arm entity configuration for observation computation
         self.left_arm_entity_cfg = SceneEntityCfg(
-            "robot",                            # robot entity name
-            joint_names=["left_arm_joint.*"],   # joint entity set
-            body_names=["left_arm_link6"]       # body entity set`
-		)
-        self.right_arm_entity_cfg = SceneEntityCfg(
-				"robot",
-				joint_names=["right_arm_joint.*"],
-				body_names=["right_arm_link6"]
-		)
-        self.left_arm_entity_cfg.resolve(self.scene) # Resolving the scene entities
-        self.right_arm_entity_cfg.resolve(self.scene)
+            "robot",
+            joint_names=["left_arm_joint.*"],
+            body_names=["left_arm_link6"]
+        )
+        self.left_arm_entity_cfg.resolve(self.scene)
 
         # -------------------------------------------------------------------------------------------------------------------------- #
         # Differential IK Controller Setup ----------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # Get body indices for end-effectors
+        # Get body index for left end-effector
         self.left_ee_body_idx = self.robot.body_names.index("left_arm_link6")
-        self.right_ee_body_idx = self.robot.body_names.index("right_arm_link6")
         
         # Compute Jacobian index (for fixed base, frame index is body index - 1)
         if self.robot.is_fixed_base:
             self.left_ee_jacobi_idx = self.left_ee_body_idx - 1
-            self.right_ee_jacobi_idx = self.right_ee_body_idx - 1
         else:
             self.left_ee_jacobi_idx = self.left_ee_body_idx
-            self.right_ee_jacobi_idx = self.right_ee_body_idx
-        
-        print(f"Left EE body index: {self.left_ee_body_idx}, Jacobian index: {self.left_ee_jacobi_idx}")
-        print(f"Right EE body index: {self.right_ee_body_idx}, Jacobian index: {self.right_ee_jacobi_idx}")
         
         # Initialize Differential IK controller for left arm
         diff_ik_cfg = DifferentialIKControllerCfg(
@@ -148,7 +88,6 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
             ik_method=self.cfg.ik_method,
         )
         self.left_diff_ik_controller = DifferentialIKController(diff_ik_cfg, num_envs=self.num_envs, device=self.device)
-        self.right_diff_ik_controller = DifferentialIKController(diff_ik_cfg, num_envs=self.num_envs, device=self.device)
         
         # Initialize Diff IK related tensors
         self._init_diff_ik_tensors()
@@ -209,18 +148,14 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         """Initialize tensors for Differential IK control."""
         # Control targets
         self.left_joint_pos_des = torch.zeros((self.num_envs, len(self._left_arm_joint_idx)), device=self.device)
-        self.right_joint_pos_des = torch.zeros((self.num_envs, len(self._right_arm_joint_idx)), device=self.device)
         self.ctrl_target_joint_pos = torch.zeros((self.num_envs, self.robot.num_joints), device=self.device)
         
         # IK command buffer (7-dim: position + quaternion)
         self.left_ik_commands = torch.zeros((self.num_envs, self.left_diff_ik_controller.action_dim), device=self.device)
-        self.right_ik_commands = torch.zeros((self.num_envs, self.right_diff_ik_controller.action_dim), device=self.device)
         
         # EE state tensors in body frame (for IK)
         self.left_ee_pos_b = torch.zeros((self.num_envs, 3), device=self.device)
         self.left_ee_quat_b = torch.zeros((self.num_envs, 4), device=self.device)
-        self.right_ee_pos_b = torch.zeros((self.num_envs, 3), device=self.device)
-        self.right_ee_quat_b = torch.zeros((self.num_envs, 4), device=self.device)
         
         # Full joint states
         self.full_joint_pos = torch.zeros((self.num_envs, self.robot.num_joints), device=self.device)
@@ -649,12 +584,17 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         self.robot.write_joint_position_to_sim(joint_pos, self._joint_idx, env_ids)
         self.robot.set_joint_position_target(joint_pos, self._joint_idx, env_ids)
         
-        # # Initialize gripper to open position
-        self._set_gripper_open(env_ids)
+        # Initialize gripper to open position
+        gearbox_assembly_utils.set_gripper_open(
+            self.robot, self.ctrl_target_joint_pos, self._left_gripper_dof_idx, env_ids
+        )
         self._step_sim_no_action()
         
-        # # Perform grasp initialization (Factory-style)
-        self._initialize_grasp(env_ids)
+        # Perform grasp initialization (Factory-style)
+        gearbox_assembly_utils.initialize_grasp(
+            self, env_ids, self.sun_planetary_gear_4,
+            grasp_height_offset=0.15, held_offset_z=0.07, grasp_duration=0.25
+        )
     
     def _step_sim_no_action(self):
         """Step the simulation without an action. Used for resets only."""
@@ -662,139 +602,6 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         self.sim.step(render=False)
         self.scene.update(dt=self.physics_dt)
         self._compute_ee_state_for_ik()
-    
-    def _set_gripper_open(self, env_ids):
-        """Set gripper to open position."""
-        gripper_open_pos = 0.04  # Maximum open position
-        self.ctrl_target_joint_pos[env_ids, self._left_gripper_dof_idx[0]] = gripper_open_pos
-        self.ctrl_target_joint_pos[env_ids, self._left_gripper_dof_idx[1]] = gripper_open_pos
-        self.robot.set_joint_position_target(
-            self.ctrl_target_joint_pos[env_ids][:, self._left_gripper_dof_idx],
-            self._left_gripper_dof_idx, env_ids
-        )
-    
-    def _set_gripper_close(self, env_ids):
-        """Set gripper to closed position."""
-        gripper_close_pos = 0.0  # Closed position
-        self.ctrl_target_joint_pos[env_ids, self._left_gripper_dof_idx[0]] = gripper_close_pos
-        self.ctrl_target_joint_pos[env_ids, self._left_gripper_dof_idx[1]] = gripper_close_pos
-        self.robot.set_joint_position_target(
-            self.ctrl_target_joint_pos[env_ids][:, self._left_gripper_dof_idx],
-            self._left_gripper_dof_idx, env_ids
-        )
-    
-    def _initialize_grasp(self, env_ids):
-        """Initialize gripper to grasp sun_planetary_gear_4 (Factory-style).
-        
-        Steps:
-        1. Disable gravity
-        2. Move gripper above held asset using IK
-        3. Move held asset to gripper position
-        4. Close gripper
-        5. Enable gravity
-        """
-        # 1. Disable gravity
-        physics_sim_view = sim_utils.SimulationContext.instance().physics_sim_view
-        physics_sim_view.set_gravity(carb.Float3(0.0, 0.0, 0.0))
-        
-        # 2. Get held asset (sun_planetary_gear_4) position
-        held_asset = self.sun_planetary_gear_4
-        held_pos_w = held_asset.data.root_pos_w.clone()  # World position
-        held_quat_w = held_asset.data.root_quat_w.clone()  # World quaternion
-        
-        # Calculate target EE position above the gear
-        # Offset in Z to position gripper above the gear
-        grasp_height_offset = 0.15  # Height offset for grasping
-        target_ee_pos_w = held_pos_w.clone()
-        target_ee_pos_w[:, 2] += grasp_height_offset
-        
-        # Target orientation: downward-facing
-        target_ee_quat = self._create_downward_quat(self.num_envs)
-        
-        # Move gripper to target position using IK
-        self._move_gripper_to_pose(env_ids, target_ee_pos_w, target_ee_quat)
-        
-        # 3. Move held asset to gripper position
-        # Get current fingertip position after IK movement
-        self._compute_ee_state_for_ik()
-        fingertip_pos_w = self.left_ee_pos_e + self.scene.env_origins
-        fingertip_quat_w = self.left_ee_quat_w
-        
-        # Calculate held asset position relative to fingertip
-        # The gear should be positioned below the fingertip
-        held_offset_local = torch.tensor([0.0, 0.0, 0.07], device=self.device).repeat(self.num_envs, 1)
-        held_offset_world = torch_utils.quat_rotate(fingertip_quat_w, held_offset_local)
-        
-        new_held_pos_w = fingertip_pos_w + held_offset_world
-        new_held_quat_w = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(self.num_envs, 1)
-        
-        # Write held asset to new position
-        held_state = held_asset.data.default_root_state.clone()
-        held_state[:, 0:3] = new_held_pos_w
-        held_state[:, 3:7] = new_held_quat_w
-        held_state[:, 7:] = 0.0  # Zero velocity
-        held_asset.write_root_pose_to_sim(held_state[:, 0:7])
-        held_asset.write_root_velocity_to_sim(held_state[:, 7:])
-        held_asset.reset()
-        
-        self._step_sim_no_action()
-        
-        # 4. Close gripper
-        grasp_time = 0.0
-        while grasp_time < 0.25:
-            self._set_gripper_close(env_ids)
-            self._step_sim_no_action()
-            grasp_time += self.sim.get_physics_dt()
-        
-        # 5. Enable gravity
-        physics_sim_view.set_gravity(carb.Float3(0.0, 0.0, -9.81))
-        
-        # Final simulation step
-        self._step_sim_no_action()
-        
-        # Reset action buffers
-        self.actions = torch.zeros_like(self.actions)
-        self.prev_actions = torch.zeros_like(self.actions)
-    
-    def _move_gripper_to_pose(self, env_ids, target_pos_w: torch.Tensor, target_quat_w: torch.Tensor):
-        """Move gripper to target pose using iterative IK."""
-        ik_time = 0.0
-        max_ik_time = 0.5  # Maximum time for IK convergence
-        
-        while ik_time < max_ik_time:
-            self._compute_ee_state_for_ik()
-            
-            # Convert target from world to body frame for IK
-            root_pose_w = self.robot.data.root_pose_w
-            target_pos_b, target_quat_b = subtract_frame_transforms(
-                root_pose_w[:, 0:3], root_pose_w[:, 3:7],
-                target_pos_w, target_quat_w
-            )
-            
-            # Set IK command
-            self.left_ik_commands[:, 0:3] = target_pos_b
-            self.left_ik_commands[:, 3:7] = target_quat_b
-            self.left_diff_ik_controller.set_command(self.left_ik_commands)
-            
-            # Get Jacobian and compute IK
-            left_jacobian = self.robot.root_physx_view.get_jacobians()[:, self.left_ee_jacobi_idx, :, self._left_arm_joint_idx]
-            joint_pos_des = self.left_diff_ik_controller.compute(
-                self.left_ee_pos_b, self.left_ee_quat_b, left_jacobian,
-                self.robot.data.joint_pos[:, self._left_arm_joint_idx]
-            )
-            
-            # Update joint targets
-            self.ctrl_target_joint_pos[:, self._left_arm_joint_idx] = joint_pos_des
-            self.robot.set_joint_position_target(self.ctrl_target_joint_pos)
-            
-            self._step_sim_no_action()
-            ik_time += self.physics_dt
-            
-            # Check convergence
-            current_pos_w = self.left_ee_pos_e + self.scene.env_origins
-            pos_error = torch.norm(current_pos_w - target_pos_w, dim=1).max()
-            if pos_error < 0.005:  # 5mm tolerance
-                break
 
     # ----------------------------------------------------------------------------------------------------
     
@@ -831,7 +638,7 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         ctrl_target_left_ee_quat_temp = torch_utils.quat_mul(yaw_rot_quat, self.left_ee_quat_w)
         
         # Constrain EEF orientation to always face downward (use helper function)
-        ctrl_target_left_ee_quat = self._constrain_quat_to_downward(ctrl_target_left_ee_quat_temp)
+        ctrl_target_left_ee_quat = gearbox_assembly_utils.constrain_quat_to_downward(ctrl_target_left_ee_quat_temp, self.device)
         
         # Convert target from world to body frame for IK
         root_pose_w = self.robot.data.root_pose_w
@@ -872,7 +679,7 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
             obj.update(sim_dt)
     
     def _compute_ee_state_for_ik(self):
-        """Compute EE states in both world and body frames for IK."""
+        """Compute left EE states in both world and body frames for IK."""
         # Get root pose
         root_pose_w = self.robot.data.root_pose_w
         
@@ -887,299 +694,50 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
             left_ee_pose_w[:, 0:3], left_ee_pose_w[:, 3:7]
         )
         
-        # Get right end-effector pose in world frame
-        right_ee_pose_w = self.robot.data.body_pose_w[:, self.right_ee_body_idx]
-        self.right_ee_pos_e = right_ee_pose_w[:, 0:3] - self.scene.env_origins
-        self.right_ee_quat_w = right_ee_pose_w[:, 3:7]
-        
-        # Compute right EE pose in body (root) frame for IK
-        self.right_ee_pos_b, self.right_ee_quat_b = subtract_frame_transforms(
-            root_pose_w[:, 0:3], root_pose_w[:, 3:7],
-            right_ee_pose_w[:, 0:3], right_ee_pose_w[:, 3:7]
-        )
-        
         # Get joint states
         self.full_joint_pos = self.robot.data.joint_pos.clone()
         self.full_joint_vel = self.robot.data.joint_vel.clone()
-
-    def _create_downward_quat(self, batch_size: int, yaw: torch.Tensor = None) -> torch.Tensor:
-        """Create quaternion for downward-facing EEF orientation.
-        
-        Args:
-            batch_size: Number of quaternions to create
-            yaw: Optional yaw angles (batch_size,). If None, yaw=0 for all.
-            
-        Returns:
-            Quaternion tensor (batch_size, 4) with roll=π, pitch=0, yaw=specified
-        """
-        roll = torch.full((batch_size,), 3.14159, device=self.device)
-        pitch = torch.zeros(batch_size, device=self.device)
-        if yaw is None:
-            yaw = torch.zeros(batch_size, device=self.device)
-        return torch_utils.quat_from_euler_xyz(roll=roll, pitch=pitch, yaw=yaw)
-    
-    def _constrain_quat_to_downward(self, quat: torch.Tensor) -> torch.Tensor:
-        """Constrain quaternion to downward-facing orientation, preserving only yaw.
-        
-        Args:
-            quat: Input quaternion (batch_size, 4)
-            
-        Returns:
-            Constrained quaternion (batch_size, 4) with roll=π, pitch=0, yaw preserved
-        """
-        # Extract euler angles and keep only yaw
-        euler_xyz = torch.stack(torch_utils.get_euler_xyz(quat), dim=1)
-        return self._create_downward_quat(quat.shape[0], yaw=euler_xyz[:, 2])
-
-    def _enforce_ee_downward_orientation(self, env_ids):
-        """Enforce EEF orientation to face downward (Z-axis pointing down) at initialization."""
-        # Create quaternion representing downward-facing orientation
-        downward_quat = self._create_downward_quat(len(env_ids))
-        
-        # Compute IK to reach current EE position with downward orientation
-        self._compute_ee_state_for_ik()
-        current_ee_pos = self.left_ee_pos_e[env_ids] + self.scene.env_origins[env_ids]
-        
-        # Set IK command for downward orientation
-        root_pose_w = self.robot.data.root_pose_w[env_ids]
-        ctrl_ee_pos_b, ctrl_ee_quat_b = subtract_frame_transforms(
-            root_pose_w[:, 0:3], root_pose_w[:, 3:7],
-            current_ee_pos, downward_quat
-        )
-        
-        # Create temporary IK commands
-        temp_ik_commands = torch.zeros((len(env_ids), 7), device=self.device)
-        temp_ik_commands[:, 0:3] = ctrl_ee_pos_b
-        temp_ik_commands[:, 3:7] = ctrl_ee_quat_b
-        self.left_diff_ik_controller.set_command(temp_ik_commands)
-        
-        # Compute joint positions using IK
-        jacobians_all = self.robot.root_physx_view.get_jacobians()
-        left_jacobian = jacobians_all[env_ids, self.left_ee_jacobi_idx, :, :][:, :, self._left_arm_joint_idx]
-        joint_pos_des = self.left_diff_ik_controller.compute(
-            ctrl_ee_pos_b, ctrl_ee_quat_b, left_jacobian, 
-            self.robot.data.joint_pos[env_ids][:, self._left_arm_joint_idx]
-        )
-        
-        # Update joint targets (vectorized)
-        joint_idx_tensor = torch.tensor(self._left_arm_joint_idx, device=self.device)
-        self.ctrl_target_joint_pos[env_ids.unsqueeze(1), joint_idx_tensor] = joint_pos_des
-        self.robot.set_joint_position_target(self.ctrl_target_joint_pos[env_ids][:, self._left_arm_joint_idx], self._left_arm_joint_idx, env_ids)
 
     # -------------------------------------------------------------------------------------------------------------------------- #
     # Observation -------------------------------------------------------------------------------------------------------------- # 
     # -------------------------------------------------------------------------------------------------------------------------- #
     def _compute_intermediate_values(self):
-        # Simulation ground truth data
-        # Used member variables
-        env_origins              = self.scene.env_origins
-        num_envs                 = self.scene.num_envs
-        left_arm_body_ids        = self.left_arm_entity_cfg.body_ids
-        left_arm_joint_ids       = self.left_arm_entity_cfg.joint_ids
-        right_arm_body_ids       = self.right_arm_entity_cfg.body_ids
-        right_arm_joint_ids      = self.right_arm_entity_cfg.joint_ids
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # Robot states ------------------------------------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # End effector states
-        self.left_ee_pos_e       = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
-        self.left_ee_quat_w      = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
-        self.left_ee_linvel_w    = self.robot.data.body_state_w[:, left_arm_body_ids[0], 7:10]
-        self.left_ee_angvel_w    = self.robot.data.body_state_w[:, left_arm_body_ids[0], 10:13]
-        self.right_ee_pos_e      = self.robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
-        self.right_ee_quat_w     = self.robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
-        self.right_ee_linvel_w   = self.robot.data.body_state_w[:, right_arm_body_ids[0], 7:10]
-        self.right_ee_angvel_w   = self.robot.data.body_state_w[:, right_arm_body_ids[0], 10:13]
-
-        # Arm joint positions
-        self.left_arm_joint_pos  = self.robot.data.joint_pos[:, left_arm_joint_ids]
-        self.right_arm_joint_pos = self.robot.data.joint_pos[:, right_arm_joint_ids]
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # Object states ------------------------------------------------------------------------------------------------------------ #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # Sun gear and planetary gears
-        self.sun_planetary_gear_positions = []
-        self.sun_planetary_gear_quats = []
-        sun_planetary_gear_names = [
-            'sun_planetary_gear_1', 
-            'sun_planetary_gear_2', 
-            'sun_planetary_gear_3', 
-            'sun_planetary_gear_4'
-        ]
-        for sun_planetary_gear_name in sun_planetary_gear_names:
-            gear_obj = self.obj_dict[sun_planetary_gear_name]
-            gear_pos = gear_obj.data.root_state_w[:, :3].clone()
-            gear_quat = gear_obj.data.root_state_w[:, 3:7].clone()
-
-            self.sun_planetary_gear_positions.append(gear_pos)
-            self.sun_planetary_gear_quats.append(gear_quat)
-
-        # Ring gear
-        self.ring_gear_pos = self.ring_gear.data.root_state_w[:, :3].clone()
-        self.ring_gear_quat = self.ring_gear.data.root_state_w[:, 3:7].clone()
-
-        # Planetary reducer
-        self.planetary_reducer_pos = self.planetary_reducer.data.root_state_w[:, :3].clone()
-        self.planetary_reducer_quat = self.planetary_reducer.data.root_state_w[:, 3:7].clone()
-
-        # Planetary carrier
-        self.planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()
-        self.planetary_carrier_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()
-
-        # Pin in planetary carrier
-        self.pin_positions = []
-        self.pin_quats = []
+        """Compute assembly state values needed for reward computation."""
+        num_envs = self.scene.num_envs
+        
+        # Get planetary carrier pose
+        planetary_carrier_pos = self.planetary_carrier.data.root_state_w[:, :3].clone()
+        planetary_carrier_quat = self.planetary_carrier.data.root_state_w[:, 3:7].clone()
+        
+        # Compute pin positions in world frame
+        pin_positions = []
         for pin_local_pos in self.pin_local_positions:
             pin_quat_repeated = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs, 1)
             pin_local_pos_repeated = pin_local_pos.repeat(num_envs, 1)
-
-            pin_quat, pin_pos = torch_utils.tf_combine(
-                self.planetary_carrier_quat, 
-                self.planetary_carrier_pos, 
-                pin_quat_repeated, 
-                pin_local_pos_repeated
+            _, pin_pos = torch_utils.tf_combine(
+                planetary_carrier_quat, planetary_carrier_pos,
+                pin_quat_repeated, pin_local_pos_repeated
             )
-
-            self.pin_positions.append(pin_pos)
-            self.pin_quats.append(pin_quat)
-
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # Assembly states ---------------------------------------------------------------------------------------------------------- #
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # Used member variables
-        pin_positions = self.pin_positions
-        pin_quats = self.pin_quats
-        sun_planetary_gear_positions = self.sun_planetary_gear_positions
-        sun_planetary_gear_quats = self.sun_planetary_gear_quats
-        planetary_carrier_pos = self.planetary_carrier_pos
-        planetary_carrier_quat = self.planetary_carrier_quat
-        ring_gear_pos = self.ring_gear_pos
-        ring_gear_quat = self.ring_gear_quat
-        planetary_reducer_pos = self.planetary_reducer_pos
-        planetary_reducer_quat = self.planetary_reducer_quat
-
-        # initialize
-        self.num_mounted_planetary_gears = 0
-        self.is_sun_gear_mounted = False
-        self.is_ring_gear_mounted = False
-        self.is_planetary_reducer_mounted = False
-        self.unmounted_sun_planetary_gear_positions = []
-        self.unmounted_sun_planetary_gear_quats = []
-        self.unmounted_pin_positions = []
+            pin_positions.append(pin_pos)
         
-        # How many planetary gear mounted on planetary carrier?
+        # Get gear positions
+        sun_planetary_gear_positions = []
+        for gear_name in ['sun_planetary_gear_1', 'sun_planetary_gear_2', 'sun_planetary_gear_3', 'sun_planetary_gear_4']:
+            gear_obj = self.obj_dict[gear_name]
+            sun_planetary_gear_positions.append(gear_obj.data.root_state_w[:, :3].clone())
+        
+        # Check which pins are occupied
         pin_occupied = [False] * len(pin_positions)
-        for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
-            sun_planetary_gear_pos = sun_planetary_gear_positions[sun_planetary_gear_idx]
-            sun_planetary_gear_quat = sun_planetary_gear_quats[sun_planetary_gear_idx]
-
-            is_mounted = False
-            for pin_idx in range(len(pin_positions)):
-                pin_pos = pin_positions[pin_idx]
-                pin_quat = pin_quats[pin_idx]
-
-                horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - pin_pos[:, :2])
-                vertical_error = sun_planetary_gear_pos[:, 2] - pin_pos[:, 2]
-                # orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), pin_quat.squeeze(0)))
-                orientation_error = torch.acos(torch.clamp((sun_planetary_gear_quat * pin_quat).sum(dim=-1), -1.0, 1.0))
-
-                th = self.mounting_thresholds["planetary_gear"]
-                if (horizontal_error < th["horizontal"] and
-                    vertical_error < th["vertical"] and
-                    orientation_error < th["orientation"]):
-                    self.num_mounted_planetary_gears += 1
-                    is_mounted = True
+        for gear_pos in sun_planetary_gear_positions:
+            for pin_idx, pin_pos in enumerate(pin_positions):
+                horizontal_error = torch.norm(gear_pos[:, :2] - pin_pos[:, :2], dim=1)
+                vertical_error = gear_pos[:, 2] - pin_pos[:, 2]
+                # Consider mounted if within threshold for any env
+                if (horizontal_error < 0.01).any() and (vertical_error < 0.02).any():
                     pin_occupied[pin_idx] = True
-
-            if not is_mounted:
-                self.unmounted_sun_planetary_gear_positions.append(self.sun_planetary_gear_positions[sun_planetary_gear_idx])
-                self.unmounted_sun_planetary_gear_quats.append(self.sun_planetary_gear_quats[sun_planetary_gear_idx])
-
+        
+        # Get unmounted pins
         self.unmounted_pin_positions = [pin_positions[i] for i in range(len(pin_positions)) if not pin_occupied[i]]
-
-        if len(self.unmounted_pin_positions) > 0 and len(self.unmounted_sun_planetary_gear_positions) > 0:
-            gear_positions_batch = torch.stack(self.unmounted_sun_planetary_gear_positions, dim=0).squeeze(2) # [N, num_envs, 3]
-            gear_quats_batch = torch.stack(self.unmounted_sun_planetary_gear_quats, dim=0).squeeze(2)         # [N, num_envs, 4]
-
-            gear_xy = gear_positions_batch[..., :2]
-            carrier_xy = self.planetary_carrier_pos[:, :2].unsqueeze(0) 
-            
-            gear_distances = torch.norm(gear_xy - carrier_xy, dim=2)
-            
-            sorted_gear_indices = torch.argsort(gear_distances, dim=0) # [N, num_envs]
-
-            new_gear_pos_list = []
-            new_gear_quat_list = []
-            for i in range(sorted_gear_indices.shape[0]): 
-                row_pos = torch.stack([gear_positions_batch[sorted_gear_indices[i, e], e] for e in range(num_envs)], dim=0)
-                row_quat = torch.stack([gear_quats_batch[sorted_gear_indices[i, e], e] for e in range(num_envs)], dim=0)
-                new_gear_pos_list.append(row_pos.unsqueeze(1)) # (num_envs, 1, 3) 유지
-                new_gear_quat_list.append(row_quat.unsqueeze(1))
-
-            self.unmounted_sun_planetary_gear_positions = new_gear_pos_list
-            self.unmounted_sun_planetary_gear_quats = new_gear_quat_list
-
-            pin_positions_tensor = torch.stack(self.unmounted_pin_positions, dim=0).squeeze(2) # [M, num_envs, 3]
-            reference_gear_pos = self.unmounted_sun_planetary_gear_positions[0].squeeze(1)     # [num_envs, 3]
-            
-            pin_xy = pin_positions_tensor[..., :2]
-            ref_gear_xy = reference_gear_pos[:, :2].unsqueeze(0)
-            
-            pin_distances = torch.norm(pin_xy - ref_gear_xy, dim=2) # [M, num_envs]
-            sorted_pin_indices = torch.argsort(pin_distances, dim=0)
-
-            new_pin_pos_list = []
-            for i in range(sorted_pin_indices.shape[0]): # M개 핀만큼
-                row_pin = torch.stack([pin_positions_tensor[sorted_pin_indices[i, e], e] for e in range(num_envs)], dim=0)
-                new_pin_pos_list.append(row_pin.unsqueeze(1))
-            
-            self.unmounted_pin_positions = new_pin_pos_list
-
-        # Is the sun gear mounted?
-        for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
-            sun_planetary_gear_pos = sun_planetary_gear_positions[sun_planetary_gear_idx]
-            sun_planetary_gear_quat = sun_planetary_gear_quats[sun_planetary_gear_idx]
-
-            horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - ring_gear_pos[:, :2])
-            vertical_error = sun_planetary_gear_pos[:, 2] - ring_gear_pos[:, 2]
-            # orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), ring_gear_quat.squeeze(0)))
-            orientation_error = torch.acos(torch.clamp((sun_planetary_gear_quat * ring_gear_quat).sum(dim=-1), -1.0, 1.0))
-
-            th = self.mounting_thresholds["sun_gear"]
-            if (horizontal_error < th["horizontal"] and
-                vertical_error < th["vertical"] and
-                orientation_error < th["orientation"]):
-                self.is_sun_gear_mounted = True
-
-        # Is the ring gear mounted?
-        horizontal_error = torch.norm(planetary_carrier_pos[:, :2] - ring_gear_pos[:, :2])
-        vertical_error = planetary_carrier_pos[:, 2] - ring_gear_pos[:, 2]
-        # orientation_error = torch.acos(torch.dot(planetary_carrier_quat.squeeze(0), ring_gear_quat.squeeze(0)))
-        orientation_error = torch.acos(torch.clamp((planetary_carrier_quat * ring_gear_quat).sum(dim=-1), -1.0, 1.0))
-
-        th = self.mounting_thresholds["ring_gear"]
-        if (horizontal_error < th["horizontal"] and
-            vertical_error < th["vertical"] and
-            orientation_error < th["orientation"]):
-            self.is_ring_gear_mounted = True
-
-        # Is the planetary reducer mounted?
-        for sun_planetary_gear_idx in range(len(sun_planetary_gear_positions)):
-            sun_planetary_gear_pos = sun_planetary_gear_positions[sun_planetary_gear_idx]
-            sun_planetary_gear_quat = sun_planetary_gear_quats[sun_planetary_gear_idx]
-
-            horizontal_error = torch.norm(sun_planetary_gear_pos[:, :2] - planetary_reducer_pos[:, :2])
-            vertical_error = sun_planetary_gear_pos[:, 2] - planetary_reducer_pos[:, 2]
-            # orientation_error = torch.acos(torch.dot(sun_planetary_gear_quat.squeeze(0), planetary_reducer_quat.squeeze(0)))
-            orientation_error = torch.acos(torch.clamp((sun_planetary_gear_quat * planetary_reducer_quat).sum(dim=-1), -1.0, 1.0))
-
-            th = self.mounting_thresholds["planetary_reducer"]
-            if (horizontal_error < th["horizontal"] and
-                vertical_error < th["vertical"] and
-                orientation_error < th["orientation"]):
-                self.is_planetary_reducer_mounted = True
 
     def _get_observations(self) -> dict:
         """Get actor/critic inputs using left arm only."""
@@ -1201,56 +759,6 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
     # -------------------------------------------------------------------------------------------------------------------------- #
     # Reward ------------------------------------------------------------------------------------------------------------------- # 
     # -------------------------------------------------------------------------------------------------------------------------- #
-    def _squashing_fn(self, x: torch.Tensor, a: float, b: float) -> torch.Tensor:
-        """Squashing function for multi-scale keypoint rewards.
-        
-        Returns reward that decreases as distance x increases.
-        Different (a, b) parameters create different reward scales:
-        - Low a, high b: gentle slope for encouraging approach from far
-        - High a, low b: steep slope for fine alignment
-        
-        Args:
-            x: Distance tensor
-            a: Steepness parameter
-            b: Offset parameter
-            
-        Returns:
-            Reward tensor in range (0, 1/(2+b)]
-        """
-        return 1.0 / (torch.exp(a * x) + b + torch.exp(-a * x))
-    
-    def _get_keypoint_offsets(self, num_keypoints: int) -> torch.Tensor:
-        """Get keypoint offsets for reward computation.
-        
-        Creates offsets arranged in a pattern around the object center.
-        """
-        if num_keypoints == 1:
-            return torch.zeros((1, 3), device=self.device)
-        elif num_keypoints == 4:
-            # 4 corners pattern
-            offsets = torch.tensor([
-                [1.0, 0.0, 0.0],
-                [-1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, -1.0, 0.0],
-            ], device=self.device)
-            return offsets
-        elif num_keypoints == 8:
-            # 8 corners of a cube
-            offsets = torch.tensor([
-                [1.0, 1.0, 1.0],
-                [1.0, 1.0, -1.0],
-                [1.0, -1.0, 1.0],
-                [1.0, -1.0, -1.0],
-                [-1.0, 1.0, 1.0],
-                [-1.0, 1.0, -1.0],
-                [-1.0, -1.0, 1.0],
-                [-1.0, -1.0, -1.0],
-            ], device=self.device)
-            return offsets
-        else:
-            return torch.zeros((num_keypoints, 3), device=self.device)
-    
     def _get_curr_successes(self, success_threshold: float) -> torch.Tensor:
         """Check if gear4 is successfully placed on the target pin (first unmounted pin)."""
         # Get gear4 position
@@ -1294,7 +802,7 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         
         # Compute keypoints on gear4 and target positions
         num_keypoints = self.cfg.num_keypoints
-        keypoint_offsets = self._get_keypoint_offsets(num_keypoints) * self.cfg.keypoint_scale
+        keypoint_offsets = gearbox_assembly_utils.get_keypoint_offsets(num_keypoints, self.device) * self.cfg.keypoint_scale
         
         keypoints_held = torch.zeros((self.num_envs, num_keypoints, 3), device=self.device)
         keypoints_target = torch.zeros((self.num_envs, num_keypoints, 3), device=self.device)
@@ -1326,9 +834,9 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
         curr_success = self._get_curr_successes(success_threshold=self.cfg.success_threshold)
         
         rew_dict = {
-            "kp_baseline": self._squashing_fn(keypoint_dist, a0, b0),
-            "kp_coarse": self._squashing_fn(keypoint_dist, a1, b1),
-            "kp_fine": self._squashing_fn(keypoint_dist, a2, b2),
+            "kp_baseline": gearbox_assembly_utils.squashing_fn(keypoint_dist, a0, b0),
+            "kp_coarse": gearbox_assembly_utils.squashing_fn(keypoint_dist, a1, b1),
+            "kp_fine": gearbox_assembly_utils.squashing_fn(keypoint_dist, a2, b2),
             "action_penalty_ee": action_penalty_ee,
             "action_grad_penalty": action_grad_penalty,
             "curr_engaged": curr_engaged.float(),
@@ -1349,6 +857,9 @@ class PlanetaryGearAssemblyRLEnv(DirectRLEnv):
     
     def _get_rewards(self) -> torch.Tensor:
         """Compute total reward from reward dictionary."""
+        # Update intermediate values (unmounted_pin_positions)
+        self._compute_intermediate_values()
+        
         rew_dict, rew_scales = self._get_rew_dict()
         
         # Sum all reward components with their scales
