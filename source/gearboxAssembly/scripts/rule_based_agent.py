@@ -36,7 +36,7 @@ import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
 import Galaxea_Lab_External.tasks  # noqa: F401
 
-# from scripts.setup_actiongraph import initialize_ros2_environment, setup_camera_publishing
+from setup_actiongraph import initialize_ros2_environment, setup_camera_publishing
 
 # 2. Force an update to initialize the extension registry paths
 # simulation_app.update()
@@ -58,11 +58,11 @@ def main():
 
     # Setup ROS2 Action Graph
     try:
-        # initialize_ros2_environment()
-        # # Setup Camera Publishing (after the scene is loaded)
-        # camera_path = '/World/envs/env_0/Robot/zed_link/head_cam/head_cam'
-        # setup_camera_publishing(camera_path)
-        pass
+        initialize_ros2_environment()
+        # Setup Camera Publishing (after the scene is loaded)
+        camera_path = '/World/envs/env_0/Robot/zed_link/head_cam/head_cam'
+        setup_camera_publishing(camera_path)
+        # pass
     except Exception as e:
         print(f"[ERROR] Failed to setup ROS2 Action Graph: {e}")
         env.close()
