@@ -40,19 +40,19 @@ class DualArmPickAndPlaceFSM:
     PLACE_HOLD_TIME   = 20
 
     def __init__(self, scene: InteractiveScene, device):
-        self.scene           = scene
-        self.robot           = scene["robot"]
-        self.device          = device        
+        self.scene  = scene
+        self.robot  = scene["robot"]
+        self.device = device        
 
         diff_ik_cfg = DifferentialIKControllerCfg(
-            command_type="pose",     # position and orientation
-            use_relative_mode=False, # global coordinate (True: relative coordinate)
-            ik_method="dls"          # damped least squares: inverse kinematics standard solver in assembly task 
+            command_type="pose",              # position and orientation
+            use_relative_mode=False,          # global coordinate (True: relative coordinate)
+            ik_method="dls"                   # damped least squares: inverse kinematics standard solver in assembly task 
         )
         self.left_diff_ik_controller = DifferentialIKController(
             diff_ik_cfg,
-            num_envs=self.scene.num_envs, # number of parallel environment in Isaac Sim, vectorizated simulation
-            device=self.device            # "cuda": gpu / "cpu": cpu
+            num_envs=self.scene.num_envs,     # number of parallel environment in Isaac Sim, vectorizated simulation
+            device=self.device                # "cuda": gpu / "cpu": cpu
         )
         self.right_diff_ik_controller = DifferentialIKController(
             diff_ik_cfg,
@@ -127,12 +127,6 @@ class DualArmPickAndPlaceFSM:
         self.target_place_quat_b           = None
         self.target_place_ready_pos_b      = None
         self.target_place_approach_pos_b   = None
-        self.target_pick_pos_w             = None # *
-        self.target_pick_quat_w            = None # *
-        self.target_pick_ready_pos_w       = None
-        self.target_place_pos_w            = None # *
-        self.target_place_ready_pos_w      = None
-        self.target_place_approach_pos_w   = None
 
         # set_target_object
         self.target_object_name = None
@@ -168,23 +162,23 @@ class DualArmPickAndPlaceFSM:
             target_pin_pos_w          
         ):
         # Robot states
-        self.left_ee_pos_w   = left_ee_pos_w
-        self.left_ee_quat_w  = left_ee_quat_w
-        self.right_ee_pos_w  = right_ee_pos_w
-        self.right_ee_quat_w = right_ee_quat_w
-        self.base_pos_w      = base_pos_w
-        self.base_quat_w     = base_quat_w
+        self.left_ee_pos_w                    = left_ee_pos_w
+        self.left_ee_quat_w                   = left_ee_quat_w
+        self.right_ee_pos_w                   = right_ee_pos_w
+        self.right_ee_quat_w                  = right_ee_quat_w
+        self.base_pos_w                       = base_pos_w
+        self.base_quat_w                      = base_quat_w
 
         # Object states
-        self.planetary_carrier_pos_w = planetary_carrier_pos_w
-        self.planetary_carrier_quat_w = planetary_carrier_quat_w
-        self.ring_gear_pos_w = ring_gear_pos_w
-        self.ring_gear_quat_w = ring_gear_quat_w
-        self.planetary_reducer_pos_w = planetary_reducer_pos_w
-        self.planetary_reducer_quat_w = planetary_reducer_quat_w
-        self.target_sun_planetary_gear_pos_w = target_sun_planetary_gear_pos_w
+        self.planetary_carrier_pos_w          = planetary_carrier_pos_w
+        self.planetary_carrier_quat_w         = planetary_carrier_quat_w
+        self.ring_gear_pos_w                  = ring_gear_pos_w
+        self.ring_gear_quat_w                 = ring_gear_quat_w
+        self.planetary_reducer_pos_w          = planetary_reducer_pos_w
+        self.planetary_reducer_quat_w         = planetary_reducer_quat_w
+        self.target_sun_planetary_gear_pos_w  = target_sun_planetary_gear_pos_w
         self.target_sun_planetary_gear_quat_w = target_sun_planetary_gear_quat_w
-        self.target_pin_pos_w = target_pin_pos_w
+        self.target_pin_pos_w                 = target_pin_pos_w
 
     def set_target_object(self, target_object_name):
         """
@@ -202,12 +196,6 @@ class DualArmPickAndPlaceFSM:
         self.target_place_quat_b         = None
         self.target_place_ready_pos_b    = None
         self.target_place_approach_pos_b = None
-        self.target_pick_pos_w           = None
-        self.target_pick_quat_w          = None 
-        self.target_pick_ready_pos_w     = None
-        self.target_place_pos_w          = None 
-        self.target_place_ready_pos_w    = None
-        self.target_place_approach_pos_w = None
 
     def solve_inverse_kinematics(self,
             arm_name        : str,
@@ -281,7 +269,7 @@ class DualArmPickAndPlaceFSM:
     def transform_world_to_base(self, 
             pos_w: torch.Tensor, 
             quat_w: torch.Tensor
-        ):
+        ) -> torch.Tensor:
         """
         World frame to base frame
         """
@@ -308,12 +296,27 @@ class DualArmPickAndPlaceFSM:
             return self.left_ee_pos_w
         elif self.active_arm_name == "right":
             return self.right_ee_pos_w
-        
-    def is_ee_reached_to(self, target_pos, tolerance=0.01):
-        current_ee_pos_w = self.get_active_ee_pos_w()
-        error = torch.norm(current_ee_pos_w - target_pos, dim=1)
-        return error < tolerance
     
+    @property
+    def active_ee_pos_b(self) -> torch.Tensor:
+        if self.active_arm_name == "left":
+            ee_pos_w = self.left_ee_pos_w
+            ee_quat_w = self.left_ee_quat_w
+        elif self.active_arm_name == "right":
+            ee_pos_w = self.right_ee_pos_w
+            ee_quat_w = self.right_ee_quat_w
+
+        ee_pos_b, _ = self.transform_world_to_base(ee_pos_w, ee_quat_w)
+        return ee_pos_b
+        
+    def is_ee_reached_to(self, 
+            target_pos_b: torch.Tensor, 
+            tolerance: float = 0.01
+        ) -> torch.BoolTensor:
+        current_ee_pos_b = self.active_ee_pos_b
+        error = torch.norm(current_ee_pos_b - target_pos_b, dim=1)
+        return error < tolerance
+
     # -------------------------------------------------------------------------------------------------------------------------- #
     # FSM states --------------------------------------------------------------------------------------------------------------- #
     # -------------------------------------------------------------------------------------------------------------------------- #
@@ -326,7 +329,6 @@ class DualArmPickAndPlaceFSM:
         num_envs = self.scene.num_envs
 
         planetary_carrier_pos_w = self.planetary_carrier_pos_w
-        planetary_carrier_quat_w = self.planetary_carrier_quat_w
         ring_gear_pos_w = self.ring_gear_pos_w
         ring_gear_quat_w = self.ring_gear_quat_w
         planetary_reducer_pos_w = self.planetary_reducer_pos_w
@@ -485,12 +487,6 @@ class DualArmPickAndPlaceFSM:
         )  
 
         # Update member variables
-        self.target_pick_pos_w           = target_pick_pos_w
-        self.target_pick_quat_w          = target_pick_quat_w
-        self.target_pick_ready_pos_w     = target_pick_ready_pos_w
-        self.target_place_pos_w          = target_place_pos_w
-        self.target_place_ready_pos_w    = target_place_ready_pos_w
-        self.target_place_approach_pos_w = target_place_approach_pos_w
         self.target_pick_pos_b           = target_pick_pos_b
         self.target_pick_quat_b          = target_pick_quat_b
         self.target_pick_ready_pos_b     = target_pick_ready_pos_b
@@ -509,10 +505,7 @@ class DualArmPickAndPlaceFSM:
             self.active_gripper_joint_ids = self.right_gripper_entity_cfg.joint_ids
 
         # [State Transition] PLANNING -> STAGING
-        self.timer += 1
-        if self.timer > self.TIME_CONSTANT_50:
-            self.timer = 0
-            self.state = PickAndPlaceState.STAGING
+        self.state = PickAndPlaceState.STAGING
 
     def _state_staging(self):
         # Used member variables
@@ -570,10 +563,8 @@ class DualArmPickAndPlaceFSM:
 
     def _state_pick_ready(self):
         arm_name = self.active_arm_name
-        ee_pos_w = self.get_active_ee_pos_w()
         target_pick_ready_pos_b = self.target_pick_ready_pos_b
         target_pick_quat_b = self.target_pick_quat_b
-        target_pick_ready_pos_w = self.target_pick_ready_pos_w
 
         desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
             arm_name=arm_name,
@@ -585,7 +576,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] PICK_READY -> PICK_APPROACH
         self.timer += 1
-        if (self.position_reached(ee_pos_w, target_pick_ready_pos_w) and 
+        if (self.is_ee_reached_to(target_pos_b=target_pick_ready_pos_b) and 
             self.timer > self.TIME_CONSTANT_50 or 
             self.timer > self.TIME_CONSTANT_150):
             self.timer = 0
@@ -593,10 +584,8 @@ class DualArmPickAndPlaceFSM:
 
     def _state_pick_approach(self):
         arm_name = self.active_arm_name
-        ee_pos_w = self.get_active_ee_pos_w()
         target_pick_pos_b = self.target_pick_pos_b
         target_pick_quat_b = self.target_pick_quat_b
-        target_pick_pos_w = self.target_pick_pos_w
 
         desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
             arm_name=arm_name,
@@ -608,7 +597,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] PICK_APPROACH -> PICK_EXECUTION
         self.timer += 1
-        if (self.position_reached(ee_pos_w, target_pick_pos_w) and 
+        if (self.is_ee_reached_to(target_pos_b=target_pick_pos_b) and 
             self.timer > self.TIME_CONSTANT_100 or 
             self.timer > self.TIME_CONSTANT_150):
             self.timer = 0
@@ -637,8 +626,6 @@ class DualArmPickAndPlaceFSM:
         arm_name = self.active_arm_name
         target_pick_ready_pos_b = self.target_pick_ready_pos_b
         target_pick_quat_b = self.target_pick_quat_b
-        ee_pos_w = self.get_active_ee_pos_w()
-        target_pick_ready_pos_w = self.target_pick_ready_pos_w
 
         desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics(
             arm_name        =arm_name,
@@ -650,7 +637,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] PICK_COMPLETE -> PLACE_READY
         self.timer += 1
-        if (self.position_reached(ee_pos_w, target_pick_ready_pos_w) and 
+        if (self.is_ee_reached_to(target_pos_b=target_pick_ready_pos_b) and 
             self.timer > self.TIME_CONSTANT_50 or
             self.timer > self.TIME_CONSTANT_150):
             self.timer = 0
@@ -660,8 +647,6 @@ class DualArmPickAndPlaceFSM:
         arm_name = self.active_arm_name
         target_place_ready_pos_b = self.target_place_ready_pos_b
         target_place_quat_b = self.target_place_quat_b
-        ee_pos_w = self.get_active_ee_pos_w()
-        target_place_ready_pos_w = self.target_place_ready_pos_w
 
         desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
             arm_name=arm_name,
@@ -673,7 +658,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] PLACE_READY -> PLACE_APPROACH
         self.timer += 1
-        if (self.position_reached(ee_pos_w, target_place_ready_pos_w) and 
+        if (self.is_ee_reached_to(target_pos_b=target_place_ready_pos_b) and 
             self.timer > self.TIME_CONSTANT_50 or 
             self.timer > self.TIME_CONSTANT_150):
             self.timer = 0
@@ -683,8 +668,6 @@ class DualArmPickAndPlaceFSM:
         arm_name = self.active_arm_name
         target_place_approach_pos_b = self.target_place_approach_pos_b
         target_place_quat_b = self.target_place_quat_b
-        ee_pos_w = self.get_active_ee_pos_w()
-        target_place_approach_pos_w = self.target_place_approach_pos_w
 
         desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
             arm_name=arm_name,
@@ -696,7 +679,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] PLACE_APPROACH -> PLACE_EXECUTION
         self.timer += 1
-        if (self.position_reached(ee_pos_w, target_place_approach_pos_w) and 
+        if (self.is_ee_reached_to(target_pos_b=target_place_approach_pos_b) and 
             self.timer > self.TIME_CONSTANT_100 or
             self.timer > self.TIME_CONSTANT_150):
             self.timer = 0
@@ -785,18 +768,7 @@ class DualArmPickAndPlaceFSM:
 
     def _state_place_complete(self):
         arm_name = self.active_arm_name
-        target_place_ready_pos_b = self.target_place_ready_pos_b
-        target_place_quat_b = self.target_place_quat_b
         ee_pos_w = self.get_active_ee_pos_w()
-        target_place_ready_pos_w = self.target_place_ready_pos_w
-
-        # desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
-        #     arm_name=arm_name,
-        #     target_ee_pos_b=target_place_ready_pos_b, 
-        #     target_ee_quat_b=target_place_quat_b
-        # )
-        # self.joint_pos_command = desired_joint_position
-        # self.joint_pos_command_ids = desired_joint_ids
 
         if self.timer == 0:
             self.fixed_ee_pos_b, self.fixed_ee_quat_b = self.transform_world_to_base(
@@ -814,7 +786,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] PLACE_COMPLETE -> FINALIZATION
         self.timer += 1
-        if (self.position_reached(ee_pos_w, target_place_ready_pos_w) and 
+        if (self.is_ee_reached_to(target_pos_b=self.fixed_ee_pos_b) and 
             self.timer > self.TIME_CONSTANT_50 or
             self.timer > self.TIME_CONSTANT_150):
             self.timer = 0
@@ -825,4 +797,3 @@ class DualArmPickAndPlaceFSM:
         if self.timer > self.TIME_CONSTANT_50:
             self.reset()
             self.state = PickAndPlaceState.INITIALIZATION
-
