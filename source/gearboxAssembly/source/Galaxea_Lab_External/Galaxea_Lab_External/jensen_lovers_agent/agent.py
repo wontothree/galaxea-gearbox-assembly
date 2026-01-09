@@ -1,35 +1,12 @@
-import torch
-import isaacsim.core.utils.torch as torch_utils
+from .dual_arm_pick_and_place_fsm import DualArmPickAndPlaceFSM
 
 from isaaclab.scene import InteractiveScene
 import isaaclab.sim as sim_utils
 
-from isaaclab.controllers import (
-    DifferentialIKController,
-    DifferentialIKControllerCfg,
-)
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.math import subtract_frame_transforms      # Transformation from world to base coordinate
 
-from .dual_arm_pick_and_place_fsm import DualArmPickAndPlaceFSM
-
-from enum import Enum, auto
-class PickAndPlaceState(Enum):
-    INITIALIZATION  = auto()
-    PLANNING        = auto()
-    STAGING         = auto()
-    PICK_READY      = auto()
-    PICK_APPROACH   = auto()
-    PICK_EXECUTION  = auto()
-    PICK_COMPLETE   = auto()
-    PLACE_READY     = auto()
-    PLACE_APPROACH  = auto()
-
-    TWIST_INSERTION = auto()
-
-    PLACE_EXECUTION = auto()
-    PLACE_COMPLETE  = auto()
-    FINALIZATION    = auto()
+import isaacsim.core.utils.torch as torch_utils
+import torch
 
 class GalaxeaGearboxAssemblyAgent:
     def __init__(self,
@@ -141,35 +118,6 @@ class GalaxeaGearboxAssemblyAgent:
         self.joint_pos_command_ids       = None
         self.dual_arm_pick_and_place_fsm = DualArmPickAndPlaceFSM(scene=scene, device=self.device)
         self.state = None
-        
-    def pick_and_place(self, target_object_name):
-        self.observe_robot_state()
-        self.observe_assembly_state()
-
-        self.dual_arm_pick_and_place_fsm.update_observation(
-            left_ee_pos_w                    = self.left_ee_pos_w,
-            left_ee_quat_w                   = self.left_ee_quat_w,
-            right_ee_pos_w                   = self.right_ee_pos_w,
-            right_ee_quat_w                  = self.right_ee_quat_w,
-            base_pos_w                       = self.base_pos_w,
-            base_quat_w                      = self.base_quat_w,        
-            planetary_carrier_pos_w          = self.planetary_carrier_pos_w,
-            planetary_carrier_quat_w         = self.planetary_carrier_quat_w,
-            ring_gear_pos_w                  = self.ring_gear_pos_w,
-            ring_gear_quat_w                 = self.ring_gear_quat_w,
-            planetary_reducer_pos_w          = self.planetary_reducer_pos_w,
-            planetary_reducer_quat_w         = self.planetary_reducer_quat_w,
-
-            target_sun_planetary_gear_pos_w  = self.target_sun_planetary_gear_pos_w,
-            target_sun_planetary_gear_quat_w = self.target_sun_planetary_gear_quat_w,
-            target_pin_pos_w                 = self.target_pin_pos_w   
-        )
-
-        self.dual_arm_pick_and_place_fsm.set_target_object(target_object_name=target_object_name)
-        self.joint_pos_command, self.joint_pos_command_ids = self.dual_arm_pick_and_place_fsm.step()
-        self.state = self.dual_arm_pick_and_place_fsm.state
-
-        self.log()
 
     def observe_robot_state(self):
         """
@@ -390,6 +338,35 @@ class GalaxeaGearboxAssemblyAgent:
             self.target_sun_planetary_gear_quat_w = self.unmounted_sun_planetary_gear_quats_w[0].view(num_envs, -1).clone()
         if self.unmounted_pin_positions_w:
             self.target_pin_pos_w = self.unmounted_pin_positions_w[0].view(num_envs, -1).clone()
+
+    def pick_and_place(self, target_object_name):
+        self.observe_robot_state()
+        self.observe_assembly_state()
+
+        self.dual_arm_pick_and_place_fsm.update_observation(
+            left_ee_pos_w                    = self.left_ee_pos_w,
+            left_ee_quat_w                   = self.left_ee_quat_w,
+            right_ee_pos_w                   = self.right_ee_pos_w,
+            right_ee_quat_w                  = self.right_ee_quat_w,
+            base_pos_w                       = self.base_pos_w,
+            base_quat_w                      = self.base_quat_w,        
+            planetary_carrier_pos_w          = self.planetary_carrier_pos_w,
+            planetary_carrier_quat_w         = self.planetary_carrier_quat_w,
+            ring_gear_pos_w                  = self.ring_gear_pos_w,
+            ring_gear_quat_w                 = self.ring_gear_quat_w,
+            planetary_reducer_pos_w          = self.planetary_reducer_pos_w,
+            planetary_reducer_quat_w         = self.planetary_reducer_quat_w,
+
+            target_sun_planetary_gear_pos_w  = self.target_sun_planetary_gear_pos_w,
+            target_sun_planetary_gear_quat_w = self.target_sun_planetary_gear_quat_w,
+            target_pin_pos_w                 = self.target_pin_pos_w   
+        )
+
+        self.dual_arm_pick_and_place_fsm.set_target_object(target_object_name=target_object_name)
+        self.joint_pos_command, self.joint_pos_command_ids = self.dual_arm_pick_and_place_fsm.step()
+        self.state = self.dual_arm_pick_and_place_fsm.state
+
+        self.log()
 
     def log(self):
         print(f"[Low Level FSM State] {self.dual_arm_pick_and_place_fsm.state}")
