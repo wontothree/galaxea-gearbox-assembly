@@ -37,7 +37,7 @@ from Galaxea_Lab_External.robots.recovery_rule_policy import RecoveryRulePolicy
 from isaaclab.sensors import Camera
 
 from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
-from ....jensen_lovers_agent.finite_state_machine import StateMachine, Context, SunGearMountingState
+from ....jensen_lovers_agent.assembly_fsm import StateMachine, Context, SunGearMountingState
 
 class GalaxeaLabExternalEnv(DirectRLEnv):
     cfg: GalaxeaLabExternalEnvCfg
@@ -199,7 +199,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         self._initialize_scene()
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        print(f"--------------------------------PRE PHYSICS STEP at {mdp.observations.current_time_s(self).item()} seconds--------------------------------")
+        # print(f"--------------------------------PRE PHYSICS STEP at {mdp.observations.current_time_s(self).item()} seconds--------------------------------")
         # self.actions = actions.clone()
         # print(f"_pre_physics_step actions: {self.actions}")
 
@@ -209,7 +209,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         start_time = time.time()
         # print(f"Time: {self.rule_policy.count * self.sim.get_physics_dt()}, Apply action")
         current_time_s = mdp.observations.current_time_s(self)
-        print(f"Apply action: {current_time_s.item()} seconds")
+        # print(f"Apply action: {current_time_s.item()} seconds")
 
         # action = self.env_step_action
         # joint_ids = self.env_step_joint_ids
@@ -218,8 +218,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         #     self.robot.set_joint_position_target(action, joint_ids=joint_ids)
 
         self.context.fsm.update()
-        joint_command = self.agent.joint_position_command # (num_envs, n_joints)
-        joint_ids = self.agent.joint_command_ids
+        joint_command = self.agent.joint_pos_command # (num_envs, n_joints)
+        joint_ids = self.agent.joint_pos_command_ids
         if joint_command is not None:
             self.robot.set_joint_position_target(
                 joint_command, 
@@ -249,7 +249,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
     def _get_observations(self) -> dict:
         # print(f"Time: {self.rule_policy.count * self.sim.get_physics_dt()}, Get observations")
         current_time_s = mdp.observations.current_time_s(self)
-        print(f"--------------------------------Get observations at {current_time_s.item()} seconds--------------------------------")
+        # print(f"--------------------------------Get observations at {current_time_s.item()} seconds--------------------------------")
         data_type = "rgb"
         # self.head_camera._update_outdated_buffers()
         # self.left_hand_camera._update_outdated_buffers()
@@ -412,14 +412,14 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         return score, time_cost
 
     def _get_rewards(self) -> torch.Tensor:
-        print(f"Get rewards at {self.rule_policy.count * self.sim.get_physics_dt()} seconds")
+        # print(f"Get rewards at {self.rule_policy.count * self.sim.get_physics_dt()} seconds")
         self.score, time_cost = self.evaluate_score()
-        print(f"score: {self.score}")
+        # print(f"score: {self.score}")
 
         return self.score
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        print(f"--------------------------------Get dones at {self.rule_policy.count * self.sim.get_physics_dt()} seconds--------------------------------")
+        # print(f"--------------------------------Get dones at {self.rule_policy.count * self.sim.get_physics_dt()} seconds--------------------------------")
         finish_task = torch.tensor(self.evaluate_score() == 6, device=self.device) or self.rule_policy.count >= self.rule_policy.total_time_steps
         time_out = self.episode_length_buf >= self.max_episode_length - 1
 
@@ -648,8 +648,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
             # Store in dictionary
             assembled_gears_state[gear_name] = gear_root_state.clone()
             
-            print(f"[INFO] {gear_name} assembled to pin_{gear_idx}")
-            print(f"       Position: {gear_world_pos[0]}, Orientation: {gear_world_quat[0]}")
+            # print(f"[INFO] {gear_name} assembled to pin_{gear_idx}")
+            # print(f"       Position: {gear_world_pos[0]}, Orientation: {gear_world_quat[0]}")
         
         return assembled_gears_state
 
@@ -689,8 +689,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
             gear_root_state[env_idx, :3] = gear_world_pos
             gear_root_state[env_idx, 3:7] = gear_world_quat
             
-            print(f"[INFO] Env {env_idx}: sun_planetary_gear_4 stacked on {selected_gear_name}")
-            print(f"       Position: {gear_world_pos}, Orientation: {gear_world_quat}")
+            # print(f"[INFO] Env {env_idx}: sun_planetary_gear_4 stacked on {selected_gear_name}")
+            # print(f"       Position: {gear_world_pos}, Orientation: {gear_world_quat}")
         
         # Write to simulation
         self.sun_planetary_gear_4.write_root_state_to_sim(gear_root_state)
@@ -756,8 +756,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
             gear_root_state[env_idx, :3] = gear_world_pos
             gear_root_state[env_idx, 3:7] = gear_world_quat
             
-            print(f"[INFO] Env {env_idx}: sun_planetary_gear_4 inclined at 45° around axis ({tilt_axis_x:.3f}, {tilt_axis_y:.3f}, {tilt_axis_z:.3f})")
-            print(f"       Position: {gear_world_pos}, Orientation: {gear_world_quat}")
+            # print(f"[INFO] Env {env_idx}: sun_planetary_gear_4 inclined at 45° around axis ({tilt_axis_x:.3f}, {tilt_axis_y:.3f}, {tilt_axis_z:.3f})")
+            # print(f"       Position: {gear_world_pos}, Orientation: {gear_world_quat}")
         
         # Write to simulation
         self.sun_planetary_gear_4.write_root_state_to_sim(gear_root_state)
@@ -765,7 +765,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         return {'sun_planetary_gear_4': gear_root_state.clone()}
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
-        print(f"--------------------------------RESET--------------------------------")
+        # print(f"--------------------------------RESET--------------------------------")
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
@@ -937,7 +937,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         is_rendering = self.sim.has_gui() or self.sim.has_rtx_sensors()
 
 
-        print(f"Generate action at {current_time_s.item()} seconds")
+        # print(f"Generate action at {current_time_s.item()} seconds")
         self.env_step_action, self.env_step_joint_ids = self.rule_policy.get_action()
 
 
@@ -969,68 +969,68 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
         # -- reset envs that terminated/timed-out and log the episode information
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
-        if len(reset_env_ids) > 0:
-            print(f"Writing data to hdf5 file")
-            with h5py.File(self.save_hdf5_file_name, 'w') as f:
-                f.attrs['sim'] = True
-                obs = f.create_group('observations')
-                act = f.create_group('actions')
-                num_items = len(self.data_dict['/observations/head_rgb'])
-                obs.create_dataset('head_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
-                obs.create_dataset('left_hand_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
-                obs.create_dataset('right_hand_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
-                obs.create_dataset('head_depth', shape=(num_items, 240, 320), dtype='float32')
-                obs.create_dataset('left_hand_depth', shape=(num_items, 240, 320), dtype='float32')
-                obs.create_dataset('right_hand_depth', shape=(num_items, 240, 320), dtype='float32')
-                obs.create_dataset('left_arm_joint_pos', shape=(num_items, 6), dtype='float32')
-                obs.create_dataset('right_arm_joint_pos', shape=(num_items, 6), dtype='float32')
-                obs.create_dataset('left_gripper_joint_pos', shape=(num_items, ), dtype='float32')
-                obs.create_dataset('right_gripper_joint_pos', shape=(num_items, ), dtype='float32')
-                obs.create_dataset('left_arm_joint_vel', shape=(num_items, 6), dtype='float32')
-                obs.create_dataset('right_arm_joint_vel', shape=(num_items, 6), dtype='float32')
-                obs.create_dataset('left_gripper_joint_vel', shape=(num_items, ), dtype='float32')
-                obs.create_dataset('right_gripper_joint_vel', shape=(num_items, ), dtype='float32')
-                act.create_dataset('left_arm_action', shape=(num_items, 6), dtype='float32')
-                act.create_dataset('right_arm_action', shape=(num_items, 6), dtype='float32')
-                act.create_dataset('left_gripper_action', shape=(num_items, ), dtype='float32')
-                act.create_dataset('right_gripper_action', shape=(num_items, ), dtype='float32')
+        # if len(reset_env_ids) > 0:
+        #     print(f"Writing data to hdf5 file")
+        #     with h5py.File(self.save_hdf5_file_name, 'w') as f:
+        #         f.attrs['sim'] = True
+        #         obs = f.create_group('observations')
+        #         act = f.create_group('actions')
+        #         num_items = len(self.data_dict['/observations/head_rgb'])
+        #         obs.create_dataset('head_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
+        #         obs.create_dataset('left_hand_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
+        #         obs.create_dataset('right_hand_rgb', shape=(num_items, 240, 320, 3), dtype='uint8')
+        #         obs.create_dataset('head_depth', shape=(num_items, 240, 320), dtype='float32')
+        #         obs.create_dataset('left_hand_depth', shape=(num_items, 240, 320), dtype='float32')
+        #         obs.create_dataset('right_hand_depth', shape=(num_items, 240, 320), dtype='float32')
+        #         obs.create_dataset('left_arm_joint_pos', shape=(num_items, 6), dtype='float32')
+        #         obs.create_dataset('right_arm_joint_pos', shape=(num_items, 6), dtype='float32')
+        #         obs.create_dataset('left_gripper_joint_pos', shape=(num_items, ), dtype='float32')
+        #         obs.create_dataset('right_gripper_joint_pos', shape=(num_items, ), dtype='float32')
+        #         obs.create_dataset('left_arm_joint_vel', shape=(num_items, 6), dtype='float32')
+        #         obs.create_dataset('right_arm_joint_vel', shape=(num_items, 6), dtype='float32')
+        #         obs.create_dataset('left_gripper_joint_vel', shape=(num_items, ), dtype='float32')
+        #         obs.create_dataset('right_gripper_joint_vel', shape=(num_items, ), dtype='float32')
+        #         act.create_dataset('left_arm_action', shape=(num_items, 6), dtype='float32')
+        #         act.create_dataset('right_arm_action', shape=(num_items, 6), dtype='float32')
+        #         act.create_dataset('left_gripper_action', shape=(num_items, ), dtype='float32')
+        #         act.create_dataset('right_gripper_action', shape=(num_items, ), dtype='float32')
                 
-                f.create_dataset('score', shape=(num_items,), dtype='int32')
-                f.create_dataset('current_time', shape=(num_items,), dtype='float32')
-                # f.create_dataset('time_cost', data=self.time_cost)
+        #         f.create_dataset('score', shape=(num_items,), dtype='int32')
+        #         f.create_dataset('current_time', shape=(num_items,), dtype='float32')
+        #         # f.create_dataset('time_cost', data=self.time_cost)
 
-                for name, value in self.data_dict.items():
-                    # print(f"Writing {name} to hdf5 file with value: {value}")
-                    f[name][...] = value
+        #         for name, value in self.data_dict.items():
+        #             # print(f"Writing {name} to hdf5 file with value: {value}")
+        #             f[name][...] = value
 
-            self.data_dict = {
-                '/observations/head_rgb': [],
-                '/observations/left_hand_rgb': [],
-                '/observations/right_hand_rgb': [],
-                '/observations/head_depth': [],
-                '/observations/left_hand_depth': [],
-                '/observations/right_hand_depth': [],
-                '/observations/left_arm_joint_pos': [],
-                '/observations/right_arm_joint_pos': [],
-                '/observations/left_gripper_joint_pos': [],
-                '/observations/right_gripper_joint_pos': [],
-                '/observations/left_arm_joint_vel': [],
-                '/observations/right_arm_joint_vel': [],
-                '/observations/left_gripper_joint_vel': [],
-                '/observations/right_gripper_joint_vel': [],
-                '/actions/left_arm_action': [],
-                '/actions/right_arm_action': [],
-                '/actions/left_gripper_action': [],
-                '/actions/right_gripper_action': [],
-                '/score': [],
-                '/current_time': [],
-            }
+        #     self.data_dict = {
+        #         '/observations/head_rgb': [],
+        #         '/observations/left_hand_rgb': [],
+        #         '/observations/right_hand_rgb': [],
+        #         '/observations/head_depth': [],
+        #         '/observations/left_hand_depth': [],
+        #         '/observations/right_hand_depth': [],
+        #         '/observations/left_arm_joint_pos': [],
+        #         '/observations/right_arm_joint_pos': [],
+        #         '/observations/left_gripper_joint_pos': [],
+        #         '/observations/right_gripper_joint_pos': [],
+        #         '/observations/left_arm_joint_vel': [],
+        #         '/observations/right_arm_joint_vel': [],
+        #         '/observations/left_gripper_joint_vel': [],
+        #         '/observations/right_gripper_joint_vel': [],
+        #         '/actions/left_arm_action': [],
+        #         '/actions/right_arm_action': [],
+        #         '/actions/left_gripper_action': [],
+        #         '/actions/right_gripper_action': [],
+        #         '/score': [],
+        #         '/current_time': [],
+        #     }
 
-            self._reset_idx(reset_env_ids)
-            # if sensors are added to the scene, make sure we render to reflect changes in reset
-            if self.sim.has_rtx_sensors() and self.cfg.num_rerenders_on_reset > 0:
-                for _ in range(self.cfg.num_rerenders_on_reset):
-                    self.sim.render()
+        #     self._reset_idx(reset_env_ids)
+        #     # if sensors are added to the scene, make sure we render to reflect changes in reset
+        #     if self.sim.has_rtx_sensors() and self.cfg.num_rerenders_on_reset > 0:
+        #         for _ in range(self.cfg.num_rerenders_on_reset):
+        #             self.sim.render()
 
         # post-step: step interval event
         if self.cfg.events:
@@ -1049,7 +1049,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
         
 
-        print(f"####################################################Post step####################################################")
+        # print(f"####################################################Post step####################################################")
         current_pos = self.robot.data.joint_pos
         self._left_arm_action = current_pos[:, self._left_arm_joint_idx]
         self._right_arm_action = current_pos[:, self._right_arm_joint_idx]
@@ -1117,7 +1117,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         #         print(f"Type: {value.dtype}")
         # print("Begin to record data")
 
-        print("*******Write data into memory*******")
+        # print("*******Write data into memory*******")
         start_time = time.time()
 
         self.data_dict['/observations/head_rgb'].append(self.obs['head_rgb'].cpu().numpy().squeeze(0))

@@ -63,15 +63,9 @@ cd galaxe1-gearbox-assembly
 ./docker/container.py enter ros2 
 ```
 
-```bash
-export ROS_DOMAIN_ID=0
-export PYTHONPATH=/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/rclpy:$PYTHONPATH
-```
-
 Check out the ROS
 
 ```bash
-source /opt/ros/jazzy/setup.bash
 ros2 topic list
 ```
 

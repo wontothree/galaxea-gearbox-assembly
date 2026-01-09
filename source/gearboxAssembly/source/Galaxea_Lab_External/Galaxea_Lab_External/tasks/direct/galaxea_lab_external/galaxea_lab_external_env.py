@@ -28,7 +28,7 @@ from Galaxea_Lab_External.robots import GalaxeaRulePolicy
 from isaaclab.sensors import Camera
 
 from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
-from ....jensen_lovers_agent.finite_state_machine import StateMachine, Context, InitializationState
+from ....jensen_lovers_agent.assembly_fsm import StateMachine, Context, InitializationState
 
 class GalaxeaLabExternalEnv(DirectRLEnv):
     cfg: GalaxeaLabExternalEnvCfg
@@ -146,8 +146,8 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         #     self.robot.set_joint_position_target(self.action, joint_ids=joint_ids)
 
         self.context.fsm.update()
-        joint_command = self.agent.joint_position_command # (num_envs, n_joints)
-        joint_ids = self.agent.joint_command_ids
+        joint_command = self.agent.joint_pos_command # (num_envs, n_joints)
+        joint_ids = self.agent.joint_pos_command_ids
         if joint_command is not None:
             self.robot.set_joint_position_target(
                 joint_command, 
@@ -284,7 +284,7 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
     def _get_rewards(self) -> torch.Tensor:
         score, time_cost = self.evaluate_score()
-        print(f"score: {score}")
+        # print(f"score: {score}")
         reward_tensor = torch.full((self.num_envs,), score, device=self.device, dtype=torch.float32)
 
         return reward_tensor
@@ -450,9 +450,9 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
 
                 if not position_found:
                     # Max attempts reached, use the last generated position anyway with a warning
-                    print(f"[WARN] Could not find non-overlapping position for {obj_name} in env {env_idx} after {max_attempts} attempts.")
-                    print(f"       This may indicate the table area is too crowded. Consider reducing the number of objects")
-                    print(f"       or increasing the table area (x: [0.2, 0.5], y: [-0.3, 0.3]).")
+                    # print(f"[WARN] Could not find non-overlapping position for {obj_name} in env {env_idx} after {max_attempts} attempts.")
+                    # print(f"       This may indicate the table area is too crowded. Consider reducing the number of objects")
+                    # print(f"       or increasing the table area (x: [0.2, 0.5], y: [-0.3, 0.3]).")
                     root_state[env_idx, :3] = pos
                     placed_objects[env_idx].append((pos, obj_name))
 
