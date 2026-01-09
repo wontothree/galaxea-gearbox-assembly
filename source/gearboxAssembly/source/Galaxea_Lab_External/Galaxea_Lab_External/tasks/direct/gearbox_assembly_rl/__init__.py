@@ -12,16 +12,6 @@ gym.register(
 )
 
 gym.register(
-    id="Galaxea-Planetary-Gear-Assembly-RL-v0",
-    entry_point=f"{__name__}.planetary_gear_assembly_rl_env:PlanetaryGearAssemblyRLEnv",
-    disable_env_checker=True,
-    kwargs={
-        "env_cfg_entry_point": f"{__name__}.planetary_gear_assembly_rl_env_cfg:PlanetaryGearAssemblyRLEnvCfg",
-        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
-    },
-)
-
-gym.register(
     id="Galaxea-Sun-Gear-Assembly-v0",
     entry_point=f"{__name__}.sun_gear_assembly_env:SunGearAssemblyEnv",
     disable_env_checker=True,
