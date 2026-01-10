@@ -58,9 +58,9 @@ python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v
 
 ```bash
 cd galaxe1-gearbox-assembly
-./docker/container.py start ros2
+./docker/container.py start ros2 # --suffix [container_name]
 # or
-./docker/container.py enter ros2 
+./docker/container.py enter ros2 # --suffix [container_name]
 ```
 
 Check out the ROS
@@ -72,7 +72,7 @@ ros2 topic list
 2. Install dependencies
 
 ```bash
-cd galaxea-gearbox-assembly/source/gearboxAssembly
+cd /galaxea-gearbox-assembly/source/gearboxAssembly
 python -m pip install -e source/Galaxea_Lab_External
 ```
 
