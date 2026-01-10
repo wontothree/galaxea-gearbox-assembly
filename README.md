@@ -78,7 +78,7 @@ ros2 topic list
 2. Install dependencies
 
 ```bash
-cd galaxea-gearbox-assembly/source/gearboxAssembly
+cd /galaxea-gearbox-assembly/source/gearboxAssembly
 python -m pip install -e source/Galaxea_Lab_External
 ```
 
