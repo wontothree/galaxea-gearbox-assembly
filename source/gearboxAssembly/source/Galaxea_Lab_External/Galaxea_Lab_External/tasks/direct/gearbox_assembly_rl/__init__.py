@@ -40,3 +40,13 @@ gym.register(
         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
     },
 )
+
+gym.register(
+    id="Galaxea-Reach-DiffIK-Direct-v0",
+    entry_point=f"{__name__}.galaxea_reach_diffik_env:GalaxeaReachDiffIKEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.galaxea_reach_diffik_env_cfg:GalaxeaReachDiffIKEnvCfg",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_reach_cfg.yaml",
+    },
+)
