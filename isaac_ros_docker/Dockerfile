@@ -6,7 +6,7 @@ ENV ISAAC_ROS_WS=/workspace/isaac_ros_ws
 RUN apt-get update && apt-get install -y sudo git python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
-RUN echo "source /opt/ros/jazzy/setup.bash" >> /etc/bash.bashrc && \
-    echo "source /workspace/isaac_ros_ws/install/setup.bash 2>/dev/null || true" >> /etc/bash.bashrc
+RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
+    # echo "source /workspace/isaac_ros_ws/install/setup.bash 2>/dev/null || true" >> /etc/bash.bashrc
 
 WORKDIR /workspace/isaac_ros_ws

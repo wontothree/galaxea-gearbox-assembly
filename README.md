@@ -129,34 +129,19 @@ docker build -t isaac_ros .
 
 2. Open the additional window on the same container
 
-
 ```bash
 ./run.sh
 ```
 
-3. Install the dependencies
+3. Setup environment
 
 ```bash
-export ISAAC_ROS_WS=/workspace/isaac_ros_ws
-echo $ISAAC_ROS_WS
-sudo apt-get update
-rosdep update && rosdep install --from-paths ${ISAAC_ROS_WS}/src/isaac_ros_pose_estimation/isaac_ros_foundationpose --ignore-src -y
-
-rosdep update && rosdep install --from-paths ${ISAAC_ROS_WS}/src/isaac_ros_object_detection/isaac_ros_rtdetr --ignore-src -y
+source ${ISAAC_ROS_WS}/setup_env.sh
 ```
 
-3. Build the packages
-
+4. Kill
 ```bash
-cd ${ISAAC_ROS_WS}/ && \
-   colcon build --symlink-install --packages-up-to isaac_ros_foundationpose --base-paths ${ISAAC_ROS_WS}/src/isaac_ros_pose_estimation/isaac_ros_foundationpose
-
-cd ${ISAAC_ROS_WS} && \
-   colcon build --symlink-install --packages-up-to isaac_ros_rtdetr --base-paths ${ISAAC_ROS_WS}/src/isaac_ros_object_detection/isaac_ros_rtdetr
-```
-
-```bash
-source ${ISAAC_ROS_WS}/install/setup.bash
+./kill.sh
 ```
 
 ## Train
