@@ -122,12 +122,9 @@ ros2 topic list
 1. Build the Docker image of Isaac ROS and run the container
 
 ```bash
-export ROS_DOMAIN_ID=0
 xhost +local:docker
 cd galaxea-gearbox-assembly/isaac_ros_docker
 docker build -t isaac_ros .
-
-chmod +x run.sh
 ./run.sh
 ```
 
@@ -135,10 +132,7 @@ chmod +x run.sh
 
 
 ```bash
-docker ps
-docker exec -it -u root isaac_ros /bin/bash
-# or
-docker exec -d -u root isaac_ros /bin/bash
+./run.sh
 ```
 
 3. Install the dependencies
@@ -155,9 +149,6 @@ rosdep update && rosdep install --from-paths ${ISAAC_ROS_WS}/src/isaac_ros_objec
 3. Build the packages
 
 ```bash
-export ISAAC_ROS_WS=/workspace/isaac_ros_ws
-echo $ISAAC_ROS_WS
-source /opt/ros/jazzy/setup.bash
 cd ${ISAAC_ROS_WS}/ && \
    colcon build --symlink-install --packages-up-to isaac_ros_foundationpose --base-paths ${ISAAC_ROS_WS}/src/isaac_ros_pose_estimation/isaac_ros_foundationpose
 
@@ -167,7 +158,6 @@ cd ${ISAAC_ROS_WS} && \
 
 ```bash
 source ${ISAAC_ROS_WS}/install/setup.bash
-source install/setup.bash
 ```
 
 ## Train
