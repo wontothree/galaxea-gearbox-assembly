@@ -44,7 +44,7 @@ def setup_camera_publishing(prim_path, resolution=(320, 240)):
                     ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
                     ("RenderProduct", "isaacsim.core.nodes.IsaacCreateRenderProduct"),
                     ("RGBCameraHelper", "isaacsim.ros2.bridge.ROS2CameraHelper"),
-                    ("CameraInfoHelper", "isaacsim.ros2.bridge.ROS2PublishCameraInfo"),
+                    ("CameraInfoHelper", "isaacsim.ros2.bridge.ROS2CameraInfoHelper"),
                     ("DepthCameraHelper", "isaacsim.ros2.bridge.ROS2CameraHelper"),
                 ],
                 og.Controller.Keys.CONNECT: [
@@ -55,7 +55,7 @@ def setup_camera_publishing(prim_path, resolution=(320, 240)):
                     ("RenderProduct.outputs:execOut", "DepthCameraHelper.inputs:execIn"),
                     # Data flow: Connect Render Product Path to all helpers
                     ("RenderProduct.outputs:renderProductPath", "RGBCameraHelper.inputs:renderProductPath"),
-                    # ("RenderProduct.outputs:renderProductPath", "CameraInfoHelper.inputs:renderProductPath"),
+                    ("RenderProduct.outputs:renderProductPath", "CameraInfoHelper.inputs:renderProductPath"),
                     ("RenderProduct.outputs:renderProductPath", "DepthCameraHelper.inputs:renderProductPath"),
                 ],
                 og.Controller.Keys.SET_VALUES: [
