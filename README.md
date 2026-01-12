@@ -122,7 +122,6 @@ ros2 topic list
 1. Build the Docker image of Isaac ROS and run the container
 
 ```bash
-xhost +local:docker
 cd galaxea-gearbox-assembly/isaac_ros_docker
 docker build -t isaac_ros .
 ./run.sh

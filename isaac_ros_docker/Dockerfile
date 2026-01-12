@@ -10,4 +10,3 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /etc/bash.bashrc && \
     echo "source /workspace/isaac_ros_ws/install/setup.bash 2>/dev/null || true" >> /etc/bash.bashrc
 
 WORKDIR /workspace/isaac_ros_ws
-RUN chmod 777 /workspace/isaac_ros_ws
