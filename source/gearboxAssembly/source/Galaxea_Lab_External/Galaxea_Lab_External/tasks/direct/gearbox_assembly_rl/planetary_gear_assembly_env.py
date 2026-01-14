@@ -163,6 +163,10 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         self.rot_threshold = torch.tensor(self.cfg.rot_action_threshold, device=self.device).repeat(
             (self.num_envs, 1)
         )
+        
+        # Tensors for finite-differencing EE velocity
+        self.prev_left_ee_pos = torch.zeros((self.num_envs, 3), device=self.device)
+        self.prev_left_ee_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
 
     def _setup_markers(self):
         """Setup visualization markers for pin positions, left EEF, and gear4."""
@@ -470,6 +474,13 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         
         # Align EEF with first pin position at episode start
         self._align_eef_with_pin(env_ids)
+        
+        # Compute EE state after alignment to get accurate positions
+        self._compute_ee_state_for_ik()
+        
+        # Initialize previous EE state for velocity computation (must be after alignment)
+        self.prev_left_ee_pos[env_ids] = self.left_ee_pos_e[env_ids].clone()
+        self.prev_left_ee_quat[env_ids] = self.left_ee_quat_w[env_ids].clone()
     
     def _step_sim_no_action(self):
         """Step the simulation without an action. Used for resets only."""
@@ -634,6 +645,38 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # Get joint states
         self.full_joint_pos = self.robot.data.joint_pos.clone()
         self.full_joint_vel = self.robot.data.joint_vel.clone()
+    
+    def _compute_ee_velocity(self):
+        """Compute EE linear and angular velocity using finite differencing."""
+        dt = self.physics_dt * self.cfg.decimation
+        
+        # Linear velocity with clipping
+        ee_linvel = (self.left_ee_pos_e - self.prev_left_ee_pos) / dt
+        ee_linvel = torch.clamp(ee_linvel, -10.0, 10.0)  # Clip to [-10, 10] m/s
+        
+        # Angular velocity from quaternion difference
+        ee_angvel = torch.zeros((self.num_envs, 3), device=self.device)
+        quat_diff = torch_utils.quat_mul(self.left_ee_quat_w, torch_utils.quat_conjugate(self.prev_left_ee_quat))
+        
+        # Convert quaternion difference to axis-angle
+        angle = 2.0 * torch.acos(torch.clamp(quat_diff[:, 0], -1.0, 1.0))
+        axis = quat_diff[:, 1:4]
+        axis_norm = torch.norm(axis, dim=1, keepdim=True)
+        
+        # Avoid division by zero
+        mask = axis_norm.squeeze() > 1e-6
+        ee_angvel[mask] = (axis[mask] / axis_norm[mask]) * (angle[mask].unsqueeze(-1) / dt)
+        ee_angvel = torch.clamp(ee_angvel, -20.0, 20.0)  # Clip to [-20, 20] rad/s
+        
+        # Check for NaN/Inf and replace with zeros
+        ee_linvel = torch.where(torch.isfinite(ee_linvel), ee_linvel, torch.zeros_like(ee_linvel))
+        ee_angvel = torch.where(torch.isfinite(ee_angvel), ee_angvel, torch.zeros_like(ee_angvel))
+        
+        # Update previous values
+        self.prev_left_ee_pos = self.left_ee_pos_e.clone()
+        self.prev_left_ee_quat = self.left_ee_quat_w.clone()
+        
+        return ee_linvel, ee_angvel
 
     # -------------------------------------------------------------------------------------------------------------------------- #
     # Observation -------------------------------------------------------------------------------------------------------------- # 
@@ -644,22 +687,33 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         pass
 
     def _get_observations(self) -> dict:
-        """Get actor/critic inputs using left arm only."""
+        """Get actor/critic inputs - Factory style with EEF pose and velocity."""
         # Get first pin position (with 14mm offset)
         pin_world_positions, _, _, _ = self.get_key_points()
         first_pin_pos = pin_world_positions[0] - self.scene.env_origins  # Environment frame
+        
+        # Compute EE velocity
+        ee_linvel, ee_angvel = self._compute_ee_velocity()
+        
+        # Relative position (EEF to target pin)
+        left_ee_pos_rel_pin = self.left_ee_pos_e - first_pin_pos
 
-        # Left arm only observation
-        # left_arm_joint_pos (6) + left_gripper_joint_pos (2) + first_pin_pos (3) + prev_actions (4) = 15
+        # Factory-style observation
+        # left_ee_pos_e (3) + left_ee_pos_rel_pin (3) + left_ee_quat_w (4) + ee_linvel (3) + ee_angvel (3) + prev_actions (4) = 20
         obs_tensors = torch.cat(
             (
-                self.left_arm_joint_pos,           # 6
-                self.left_gripper_joint_pos,       # 2
-                first_pin_pos,                     # 3
-                self.prev_actions,                 # 4
+                self.left_ee_pos_e,                # 3 - EEF position
+                left_ee_pos_rel_pin,               # 3 - EEF position relative to pin
+                self.left_ee_quat_w,               # 4 - EEF quaternion
+                ee_linvel,                         # 3 - EEF linear velocity
+                ee_angvel,                         # 3 - EEF angular velocity
+                self.prev_actions,                 # 4 - previous actions
             ),
             dim=-1,
         )
+        
+        # Safety check: replace NaN/Inf with zeros
+        obs_tensors = torch.where(torch.isfinite(obs_tensors), obs_tensors, torch.zeros_like(obs_tensors))
             
         observations = {"policy": obs_tensors}
         return observations

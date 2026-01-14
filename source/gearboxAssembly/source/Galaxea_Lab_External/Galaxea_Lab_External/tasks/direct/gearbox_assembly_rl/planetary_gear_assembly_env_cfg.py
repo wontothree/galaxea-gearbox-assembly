@@ -35,7 +35,7 @@ class PlanetaryGearAssemblyEnvCfg(GearboxAssemblyBaseEnvCfg):
         # action: 3 position + 1 yaw rotation = 4 (gripper always closed)
         # observation: 6 arm joints + 2 gripper + 3 first_pin_pos + 4 prev_actions = 15
         self.action_space = 4
-        self.observation_space = 15
+        self.observation_space = 20
 
         
         # Call parent's __post_init__
