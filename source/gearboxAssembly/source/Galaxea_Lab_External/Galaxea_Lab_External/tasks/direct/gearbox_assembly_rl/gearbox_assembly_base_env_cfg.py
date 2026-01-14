@@ -1,7 +1,7 @@
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sim import SimulationCfg
+from isaaclab.sim import SimulationCfg, PhysxCfg
 from isaaclab.utils import configclass
 from isaaclab.sensors import CameraCfg
 
@@ -80,7 +80,17 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
 
 
     # simulation
-    sim: SimulationCfg = SimulationCfg(dt=sim_dt, render_interval=decimation)
+    sim: SimulationCfg = SimulationCfg(
+        dt=sim_dt,
+        render_interval=decimation,
+        gravity=(0.0, 0.0, -9.81),
+        physx=PhysxCfg(
+            # gpu_found_lost_aggregate_pairs_capacity=2**26,
+            # gpu_total_aggregate_pairs_capacity=2**26,
+            gpu_collision_stack_size=512 * 1024 * 1024,  # 512 MB
+            gpu_max_rigid_patch_count = 262144 * 2
+        ),
+    )
 
     # robot(s)
     robot_cfg: ArticulationCfg = GALAXEA_R1_CHALLENGE_CFG.replace(prim_path="/World/envs/env_.*/Robot")
