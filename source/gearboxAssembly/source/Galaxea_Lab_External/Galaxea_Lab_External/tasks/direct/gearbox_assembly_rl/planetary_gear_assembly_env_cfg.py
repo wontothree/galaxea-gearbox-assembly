@@ -33,9 +33,9 @@ class PlanetaryGearAssemblyEnvCfg(GearboxAssemblyBaseEnvCfg):
         
         # spaces definition (6DOF robot arm)
         # action: 3 position + 1 yaw rotation = 4 (gripper always closed)
-        # observation: 6 arm joints + 2 gripper + 4 prev_actions = 12
+        # observation: 6 arm joints + 2 gripper + 3 first_pin_pos + 4 prev_actions = 15
         self.action_space = 4
-        self.observation_space = 12
+        self.observation_space = 15
 
         
         # Call parent's __post_init__
