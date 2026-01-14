@@ -746,22 +746,31 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         target_pin_pos = pin_world_positions[0] - self.scene.env_origins
         target_pin_quat = pin_world_quats[0]
         
-        # Compute keypoints on gear4 and target positions
+        # Compute keypoints on gear4 and target positions (vectorized)
         num_keypoints = self.cfg.num_keypoints
         keypoint_offsets = gearbox_assembly_utils.get_keypoint_offsets(num_keypoints, self.device) * self.cfg.keypoint_scale
         
-        keypoints_held = torch.zeros((self.num_envs, num_keypoints, 3), device=self.device)
-        keypoints_target = torch.zeros((self.num_envs, num_keypoints, 3), device=self.device)
+        # Expand for batch processing: (num_keypoints, 3) -> (num_envs, num_keypoints, 3)
+        offsets_batch = keypoint_offsets.unsqueeze(0).expand(self.num_envs, -1, -1)
         
-        for idx, offset in enumerate(keypoint_offsets):
-            # Transform offset by gear4 pose
-            offset_batch = offset.unsqueeze(0).repeat(self.num_envs, 1)
-            rotated_offset_held = torch_utils.quat_rotate(gear4_quat, offset_batch)
-            keypoints_held[:, idx, :] = gear4_pos + rotated_offset_held
-            
-            # Transform offset by target pin pose
-            rotated_offset_target = torch_utils.quat_rotate(target_pin_quat, offset_batch)
-            keypoints_target[:, idx, :] = target_pin_pos + rotated_offset_target
+        # Expand quaternions: (num_envs, 4) -> (num_envs, num_keypoints, 4)
+        gear4_quat_expanded = gear4_quat.unsqueeze(1).expand(-1, num_keypoints, -1)
+        target_pin_quat_expanded = target_pin_quat.unsqueeze(1).expand(-1, num_keypoints, -1)
+        
+        # Rotate all offsets at once (vectorized)
+        rotated_offsets_held = torch_utils.quat_rotate(
+            gear4_quat_expanded.reshape(-1, 4), 
+            offsets_batch.reshape(-1, 3)
+        ).reshape(self.num_envs, num_keypoints, 3)
+        
+        rotated_offsets_target = torch_utils.quat_rotate(
+            target_pin_quat_expanded.reshape(-1, 4),
+            offsets_batch.reshape(-1, 3)
+        ).reshape(self.num_envs, num_keypoints, 3)
+        
+        # Compute keypoint positions
+        keypoints_held = gear4_pos.unsqueeze(1) + rotated_offsets_held
+        keypoints_target = target_pin_pos.unsqueeze(1) + rotated_offsets_target
         
         # Compute mean keypoint distance
         keypoint_dist = torch.norm(keypoints_held - keypoints_target, p=2, dim=-1).mean(dim=-1)
