@@ -85,9 +85,16 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
         render_interval=decimation,
         gravity=(0.0, 0.0, -9.81),
         physx=PhysxCfg(
-            # gpu_found_lost_aggregate_pairs_capacity=2**26,
-            # gpu_total_aggregate_pairs_capacity=2**26,
-            gpu_collision_stack_size=512 * 1024 * 1024,  # 512 MB
+            gpu_found_lost_aggregate_pairs_capacity=2**26,
+            gpu_total_aggregate_pairs_capacity=2**26,
+            gpu_max_rigid_contact_count=2**23,
+            gpu_found_lost_pairs_capacity=2**22,
+            gpu_heap_capacity=2**26,
+            gpu_temp_buffer_capacity=2**24,
+            gpu_max_num_partitions=8,
+            gpu_max_soft_body_contacts=2**20,
+            gpu_max_particle_contacts=2**20,
+            gpu_collision_stack_size=768 * 1024 * 1024,  # 768 MB (increased from 512 MB)
             gpu_max_rigid_patch_count = 262144 * 2
         ),
     )
