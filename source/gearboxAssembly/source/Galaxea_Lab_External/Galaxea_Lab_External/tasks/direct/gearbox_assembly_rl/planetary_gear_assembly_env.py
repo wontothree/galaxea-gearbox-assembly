@@ -156,13 +156,18 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self.prev_actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         
-        # Action thresholds
-        self.pos_threshold = torch.tensor(self.cfg.pos_action_threshold, device=self.device).repeat(
+        # Action scale factors
+        self.pos_action_scale = torch.tensor(self.cfg.pos_action_scale, device=self.device).repeat(
             (self.num_envs, 1)
         )
-        self.rot_threshold = torch.tensor(self.cfg.rot_action_threshold, device=self.device).repeat(
+        self.rot_action_scale = torch.tensor(self.cfg.rot_action_scale, device=self.device).repeat(
             (self.num_envs, 1)
         )
+        
+        # Action smoothing and bounds (Factory-style)
+        self.ema_factor = self.cfg.ema_factor
+        self.pos_action_bounds = torch.tensor(self.cfg.pos_action_bounds, device=self.device)
+        self.rot_action_bounds = self.cfg.rot_action_bounds
         
         # Tensors for finite-differencing EE velocity
         self.prev_left_ee_pos = torch.zeros((self.num_envs, 3), device=self.device)
@@ -216,7 +221,8 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.prev_actions = self.actions.clone()
-        self.actions = actions.clone()
+        # Apply EMA smoothing (Factory-style)
+        self.actions = self.ema_factor * actions.clone() + (1 - self.ema_factor) * self.actions
         # print(f"_pre_physics_step actions: {self.actions}")
 
     def get_key_points(self):
@@ -514,8 +520,16 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
             target_eef_pos_w, target_eef_quat
         )
         
+        # Create a temporary IK controller with the correct batch size
+        diff_ik_cfg = DifferentialIKControllerCfg(
+            command_type="pose",
+            use_relative_mode=False,
+            ik_method=self.cfg.ik_method,
+        )
+        temp_ik_controller = DifferentialIKController(diff_ik_cfg, num_envs=len(env_ids), device=self.device)
+        
         # Set IK command
-        ik_commands = torch.zeros((len(env_ids), self.left_diff_ik_controller.action_dim), device=self.device)
+        ik_commands = torch.zeros((len(env_ids), temp_ik_controller.action_dim), device=self.device)
         ik_commands[:, 0:3] = target_eef_pos_b
         ik_commands[:, 3:7] = target_eef_quat_b
         
@@ -530,10 +544,10 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # Compute joint position targets
         joint_pos_current = self.full_joint_pos[env_ids][:, self._left_arm_joint_idx]
         
-        # Use a temporary controller for this batch
+        # Use the temporary controller for this batch
         for _ in range(50):  # Iterate to converge to target
-            self.left_diff_ik_controller.set_command(ik_commands)
-            joint_pos_des = self.left_diff_ik_controller.compute(
+            temp_ik_controller.set_command(ik_commands)
+            joint_pos_des = temp_ik_controller.compute(
                 left_ee_pos_b_selected, left_ee_quat_b_selected, left_jacobian, joint_pos_current
             )
             
@@ -566,15 +580,29 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # [3:4] - yaw rotation only (pitch and roll are fixed)
         
         # --- Left Arm IK ---
-        left_pos_actions = self.actions[:, 0:3] * self.pos_threshold
-        left_yaw_action = self.actions[:, 3:4] * self.rot_threshold[:, 2:3]  # Use only Z component of rot_threshold
+        left_pos_actions = self.actions[:, 0:3] * self.pos_action_scale
+        left_yaw_action = self.actions[:, 3:4] * self.rot_action_scale[:, 2:3]  # Use only Z component of rot_action_scale
         
         # Compute target position (current EE pos + delta)
         ctrl_target_left_ee_pos = self.left_ee_pos_e + left_pos_actions
         
+        # Apply position bounds clipping (Factory-style)
+        # Get first pin position as reference frame
+        pin_world_positions, _, _, _ = self.get_key_points()
+        first_pin_pos = pin_world_positions[0] - self.scene.env_origins
+        delta_pos = ctrl_target_left_ee_pos - first_pin_pos
+        # Clip XY and Z separately
+        delta_pos_xy_clipped = torch.clamp(delta_pos[:, 0:2], -self.pos_action_bounds[0], self.pos_action_bounds[0])
+        delta_pos_z_clipped = torch.clamp(delta_pos[:, 2:3], -self.pos_action_bounds[1], self.pos_action_bounds[1])
+        delta_pos_clipped = torch.cat([delta_pos_xy_clipped, delta_pos_z_clipped], dim=-1)
+        ctrl_target_left_ee_pos = first_pin_pos + delta_pos_clipped
+        
+        # Apply rotation bounds clipping (Factory-style)
+        left_yaw_action_clipped = torch.clamp(left_yaw_action, -self.rot_action_bounds, self.rot_action_bounds)
+        
         # Convert yaw rotation action to quaternion and apply to current orientation
         # Only apply yaw rotation, keeping roll and pitch fixed to face downward
-        yaw_angle = left_yaw_action.squeeze(-1)
+        yaw_angle = left_yaw_action_clipped.squeeze(-1)
         yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device).repeat(self.num_envs, 1)
         yaw_rot_quat = torch_utils.quat_from_angle_axis(yaw_angle, yaw_axis)
         yaw_rot_quat = torch.where(

@@ -197,6 +197,11 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
     # ===== IK settings =====
     ik_method: str = "dls"  # Damped Least Squares
     
-    # ===== Action thresholds =====
-    pos_action_threshold = (0.05, 0.05, 0.05)  # max position delta per step
-    rot_action_threshold = (0.1, 0.1, 0.1)     # max rotation delta per step (rad)
+    # ===== Action scale factors =====
+    pos_action_scale = (0.02, 0.02, 0.02)  # position action scale (meters per normalized action)
+    rot_action_scale = (0.1, 0.1, 0.1)     # rotation action scale (radians per normalized action)
+    
+    # ===== Action smoothing and bounds (Factory-style) =====
+    ema_factor: float = 0.5                    # EMA smoothing for actions [0, 1]
+    pos_action_bounds = (0.05, 0.05)           # max allowed distance from target (x-y, z) in meters
+    rot_action_bounds: float = 0.1             # max allowed rotation from target in radians
