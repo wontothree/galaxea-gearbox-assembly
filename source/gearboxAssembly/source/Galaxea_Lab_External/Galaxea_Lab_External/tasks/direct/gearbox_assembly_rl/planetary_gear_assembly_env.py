@@ -714,8 +714,8 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # No intermediate computation needed - always use first pin
         pass
 
-    def _get_observations(self) -> dict:
-        """Get actor/critic inputs - Factory style with EEF pose and velocity."""
+    def _get_planetary_gear_obs_state_dict(self):
+        """Populate dictionaries for the policy and critic."""
         # Get first pin position (with 14mm offset)
         pin_world_positions, _, _, _ = self.get_key_points()
         first_pin_pos = pin_world_positions[0] - self.scene.env_origins  # Environment frame
@@ -723,28 +723,66 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # Compute EE velocity
         ee_linvel, ee_angvel = self._compute_ee_velocity()
         
-        # Relative position (EEF to target pin)
-        left_ee_pos_rel_pin = self.left_ee_pos_e - first_pin_pos
+        # Get gear4 pose
+        gear4_pos = self.sun_planetary_gear_4.data.root_pos_w - self.scene.env_origins
+        gear4_quat = self.sun_planetary_gear_4.data.root_quat_w
+        
+        # Get joint states
+        left_arm_joint_pos = self.robot.data.joint_pos[:, self._left_arm_joint_idx]
+        left_gripper_joint_pos = self.robot.data.joint_pos[:, self._left_gripper_dof_idx]
+        
+        # Previous actions
+        prev_actions = self.prev_actions.clone()
+        
+        # Observation dict (for policy - partial observability)
+        obs_dict = {
+            "ee_pos": self.left_ee_pos_e,
+            "ee_pos_rel_pin": self.left_ee_pos_e - first_pin_pos,
+            "ee_quat": self.left_ee_quat_w,
+            "ee_linvel": ee_linvel,
+            "ee_angvel": ee_angvel,
+            "prev_actions": prev_actions,
+        }
+        
+        # State dict (for critic - full state information)
+        state_dict = {
+            "ee_pos": self.left_ee_pos_e,
+            "ee_pos_rel_pin": self.left_ee_pos_e - first_pin_pos,
+            "ee_quat": self.left_ee_quat_w,
+            "ee_linvel": ee_linvel,
+            "ee_angvel": ee_angvel,
+            "prev_actions": prev_actions,
+            "left_arm_joint_pos": left_arm_joint_pos,
+            "left_gripper_joint_pos": left_gripper_joint_pos,
+            "gear4_pos": gear4_pos,
+            "gear4_pos_rel_pin": gear4_pos - first_pin_pos,
+            "gear4_quat": gear4_quat,
+            "pin_pos": first_pin_pos,
+        }
+        
+        return obs_dict, state_dict
 
-        # Factory-style observation
-        # left_ee_pos_e (3) + left_ee_pos_rel_pin (3) + left_ee_quat_w (4) + ee_linvel (3) + ee_angvel (3) + prev_actions (4) = 20
+    def _get_observations(self) -> dict:
+        """Get actor/critic inputs using asymmetric critic."""
+        obs_dict, state_dict = self._get_planetary_gear_obs_state_dict()
+        
+        # Collapse observation dict to tensor following obs_order
         obs_tensors = torch.cat(
-            (
-                self.left_ee_pos_e,                # 3 - EEF position
-                left_ee_pos_rel_pin,               # 3 - EEF position relative to pin
-                self.left_ee_quat_w,               # 4 - EEF quaternion
-                ee_linvel,                         # 3 - EEF linear velocity
-                ee_angvel,                         # 3 - EEF angular velocity
-                self.prev_actions,                 # 4 - previous actions
-            ),
+            [obs_dict[key] for key in self.cfg.obs_order],
+            dim=-1,
+        )
+        
+        # Collapse state dict to tensor following state_order
+        state_tensors = torch.cat(
+            [state_dict[key] for key in self.cfg.state_order],
             dim=-1,
         )
         
         # Safety check: replace NaN/Inf with zeros
         obs_tensors = torch.where(torch.isfinite(obs_tensors), obs_tensors, torch.zeros_like(obs_tensors))
-            
-        observations = {"policy": obs_tensors}
-        return observations
+        state_tensors = torch.where(torch.isfinite(state_tensors), state_tensors, torch.zeros_like(state_tensors))
+        
+        return {"policy": obs_tensors, "critic": state_tensors}
     
     # -------------------------------------------------------------------------------------------------------------------------- #
     # Reward ------------------------------------------------------------------------------------------------------------------- # 

@@ -1,4 +1,4 @@
-from .gearbox_assembly_base_env_cfg import GearboxAssemblyBaseEnvCfg
+from .gearbox_assembly_base_env_cfg import GearboxAssemblyBaseEnvCfg, OBS_DIM_CFG, STATE_DIM_CFG
 
 class PlanetaryGearAssemblyEnvCfg(GearboxAssemblyBaseEnvCfg):
     # Disable cameras
@@ -29,14 +29,15 @@ class PlanetaryGearAssemblyEnvCfg(GearboxAssemblyBaseEnvCfg):
         # Override values from GearboxAssemblyBaseEnvCfg
         self.sim_dt = 1/120
         self.decimation = 8
-        self.episode_length_s = 20.0
+        self.episode_length_s = 10.0
         
         # spaces definition (6DOF robot arm)
         # action: 3 position + 1 yaw rotation = 4 (gripper always closed)
-        # observation: 6 arm joints + 2 gripper + 3 first_pin_pos + 4 prev_actions = 15
+        # observation: ee_pos(3) + ee_pos_rel_pin(3) + ee_quat(4) + ee_linvel(3) + ee_angvel(3) + prev_actions(4) = 20
+        # state: observation + left_arm_joint_pos(6) + left_gripper_joint_pos(2) + gear4_pos(3) + gear4_pos_rel_pin(3) + gear4_quat(4) + pin_pos(3) = 41
         self.action_space = 4
-        self.observation_space = 20
-
+        self.observation_space = sum([OBS_DIM_CFG[obs] for obs in self.obs_order])
+        self.state_space = sum([STATE_DIM_CFG[state] for state in self.state_order])
         
         # Call parent's __post_init__
         super().__post_init__()
