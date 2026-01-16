@@ -292,6 +292,16 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         score_batch, _ = self.evaluate_score()
         finish_task = score_batch >= 1.0  # Task complete when gear4 is mounted
         time_out = self.episode_length_buf >= self.max_episode_length - 1
+        
+        # Check if gear4 has fallen from EEF (dropped object termination)
+        gear4_pos = self.sun_planetary_gear_4.data.root_pos_w - self.scene.env_origins
+        eef_to_gear4_dist = torch.norm(gear4_pos - self.left_ee_pos_e, dim=1)
+        drop_threshold = 0.10  # 10cm - if gear4 is farther than this, consider it dropped
+        gear4_dropped = eef_to_gear4_dist > drop_threshold
+        
+        # Combine termination conditions
+        finish_task = finish_task | gear4_dropped
+        
         return finish_task, time_out
 
     def _initialize_scene(self):
