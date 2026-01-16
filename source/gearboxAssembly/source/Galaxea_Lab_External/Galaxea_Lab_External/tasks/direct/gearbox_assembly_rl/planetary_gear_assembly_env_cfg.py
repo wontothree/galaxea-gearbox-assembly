@@ -18,7 +18,7 @@ class PlanetaryGearAssemblyEnvCfg(GearboxAssemblyBaseEnvCfg):
     action_grad_penalty_scale: float = 0.0     # Penalty for action changes (disabled)
     
     # Success/engagement thresholds
-    success_threshold: float = 0.005           # 5mm for success (gear on pin)
+    success_threshold: float = 0.01           # 10mm for success (gear on pin)
     engage_threshold: float = 0.02             # 20mm for engagement bonus
     
     # Number of keypoints for reward computation

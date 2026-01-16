@@ -475,7 +475,7 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         # Perform grasp initialization (Factory-style)
         gearbox_assembly_utils.initialize_grasp(
             self, env_ids, self.sun_planetary_gear_4,
-            grasp_height_offset=0.15, held_offset_z=0.07, grasp_duration=0.25
+            grasp_height_offset=0.18, held_offset_z=0.07, grasp_duration=0.4
         )
         
         # Align EEF with first pin position at episode start
