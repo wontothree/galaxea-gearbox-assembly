@@ -87,13 +87,9 @@ class DualArmPickAndPlaceFSM:
         # Member variables
         # Constants
         self.initial_left_ee_pos_e         = torch.tensor([[0.3864, 0.5237, 1.1475]], device=self.device) - self.scene.env_origins
-        self.initial_left_ee_quat_w        = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
+        self.initial_left_ee_quat_w        = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device).repeat(self.scene.num_envs, 1)
         self.initial_right_ee_pos_e        = torch.tensor([[0.3864, -0.5237, 1.1475]], device=self.device) - self.scene.env_origins
-        self.initial_right_ee_quat_w       = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device)
-        self.initial_left_ee_pos_e_batch   = self.initial_left_ee_pos_e
-        self.initial_left_ee_quat_w_batch  = self.initial_left_ee_quat_w.repeat(self.scene.num_envs, 1)
-        self.initial_right_ee_pos_e_batch  = self.initial_right_ee_pos_e
-        self.initial_right_ee_quat_w_batch = self.initial_right_ee_quat_w.repeat(self.scene.num_envs, 1)
+        self.initial_right_ee_quat_w       = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device).repeat(self.scene.num_envs, 1)
 
         self.TCP_offset_z                  = 1.1475 - 1.05661
         self.TCP_offset_x                  = 0.3864 - 0.3785
@@ -133,6 +129,7 @@ class DualArmPickAndPlaceFSM:
 
         # _state_planning
         self.object_constants = {
+            "ready"             : {"grasp_pos": 0.035},
             "planetary_gear"    : {"object_height_offset": 0.0,   "lifting_height":0.15, "mount_height_offset": 0.04,  "grasp_pos": 0.03},
             "sun_gear"          : {"object_height_offset": 0.005, "lifting_height":0.15, "mount_height_offset": 0.04,  "grasp_pos": 0.018},
             "ring_gear"         : {"object_height_offset": 0.03,  "lifting_height":0.15, "mount_height_offset": 0.04,  "grasp_pos": 0.018},
@@ -144,12 +141,13 @@ class DualArmPickAndPlaceFSM:
         return self.joint_pos_command, self.joint_pos_command_ids
 
     def update_observation(self,
-            left_ee_pos_w,
-            left_ee_quat_w,
-            right_ee_pos_w,
-            right_ee_quat_w,
+            left_ee_pos_b,
+            left_ee_quat_b,
+            right_ee_pos_b,
+            right_ee_quat_b,    
             base_pos_w,
-            base_quat_w,        
+            base_quat_w,    
+
             planetary_carrier_pos_w,
             planetary_carrier_quat_w,
             ring_gear_pos_w,
@@ -162,12 +160,12 @@ class DualArmPickAndPlaceFSM:
             target_pin_pos_w          
         ):
         # Robot states
-        self.left_ee_pos_w                    = left_ee_pos_w
-        self.left_ee_quat_w                   = left_ee_quat_w
-        self.right_ee_pos_w                   = right_ee_pos_w
-        self.right_ee_quat_w                  = right_ee_quat_w
         self.base_pos_w                       = base_pos_w
         self.base_quat_w                      = base_quat_w
+        self.left_ee_pos_b                    = left_ee_pos_b
+        self.left_ee_quat_b                   = left_ee_quat_b
+        self.right_ee_pos_b                   = right_ee_pos_b
+        self.right_ee_quat_b                  = right_ee_quat_b
 
         # Object states
         self.planetary_carrier_pos_w          = planetary_carrier_pos_w
@@ -206,10 +204,10 @@ class DualArmPickAndPlaceFSM:
         target_ee_pose, current_joint_pose -> desired_joint_pose
         """
         robot = self.robot
-        left_ee_pos_w = self.left_ee_pos_w
-        left_ee_quat_w = self.left_ee_quat_w
-        right_ee_pos_w = self.right_ee_pos_w
-        right_ee_quat_w = self.right_ee_quat_w
+        left_ee_pos_b = self.left_ee_pos_b
+        left_ee_quat_b = self.left_ee_quat_b
+        right_ee_pos_b = self.right_ee_pos_b
+        right_ee_quat_b = self.right_ee_quat_b
         left_arm_entity_cfg = self.left_arm_entity_cfg
         right_arm_entity_cfg = self.right_arm_entity_cfg
         left_diff_ik_controller = self.left_diff_ik_controller
@@ -221,15 +219,15 @@ class DualArmPickAndPlaceFSM:
             arm_body_ids = left_arm_entity_cfg.body_ids
             diff_ik_controller = left_diff_ik_controller
 
-            ee_pos_w = left_ee_pos_w
-            ee_quat_w = left_ee_quat_w
+            ee_pos_b = left_ee_pos_b
+            ee_quat_b = left_ee_quat_b
         elif arm_name == "right":
             arm_joint_ids = right_arm_entity_cfg.joint_ids
             arm_body_ids = right_arm_entity_cfg.body_ids
             diff_ik_controller = right_diff_ik_controller
 
-            ee_pos_w = right_ee_pos_w
-            ee_quat_w = right_ee_quat_w
+            ee_pos_b = right_ee_pos_b
+            ee_quat_b = right_ee_quat_b
 
         if robot.is_fixed_base:                  # True
             ee_jacobi_idx = arm_body_ids[0] - 1  # index of end effector jacobian
@@ -242,12 +240,6 @@ class DualArmPickAndPlaceFSM:
             dim=-1
         )
         diff_ik_controller.set_command(ik_commands)
-
-        # Inverse kinematics solver
-        ee_pos_b, ee_quat_b = self.transform_world_to_base(
-            pos_w =ee_pos_w,
-            quat_w=ee_quat_w
-        )
 
         jacobian = robot.root_physx_view.get_jacobians()[
             :, ee_jacobi_idx, :, arm_joint_ids
@@ -290,30 +282,19 @@ class DualArmPickAndPlaceFSM:
     def transition_to(self, next_state):
         self.timer = 0
         self.state = next_state
-
-    def get_active_ee_pos_w(self):
+        
+    def get_active_ee_pos_quat_b(self):
         if self.active_arm_name == "left":
-            return self.left_ee_pos_w
+            return self.left_ee_pos_b, self.left_ee_quat_b
         elif self.active_arm_name == "right":
-            return self.right_ee_pos_w
-    
-    @property
-    def active_ee_pos_b(self) -> torch.Tensor:
-        if self.active_arm_name == "left":
-            ee_pos_w = self.left_ee_pos_w
-            ee_quat_w = self.left_ee_quat_w
-        elif self.active_arm_name == "right":
-            ee_pos_w = self.right_ee_pos_w
-            ee_quat_w = self.right_ee_quat_w
-
-        ee_pos_b, _ = self.transform_world_to_base(ee_pos_w, ee_quat_w)
-        return ee_pos_b
+            return self.right_ee_pos_b, self.right_ee_quat_b
         
     def is_ee_reached_to(self, 
             target_pos_b: torch.Tensor, 
             tolerance: float = 0.01
         ) -> torch.BoolTensor:
-        current_ee_pos_b = self.active_ee_pos_b
+        # current_ee_pos_b = self.active_ee_pos_b
+        current_ee_pos_b, _ = self.get_active_ee_pos_quat_b()
         error = torch.norm(current_ee_pos_b - target_pos_b, dim=1)
         return error < tolerance
 
@@ -510,20 +491,21 @@ class DualArmPickAndPlaceFSM:
     def _state_staging(self):
         # Used member variables
         num_envs = self.scene.num_envs
-        initial_left_ee_pos_e_batch = self.initial_left_ee_pos_e_batch
-        initial_left_ee_quat_w_batch = self.initial_left_ee_quat_w_batch
-        initial_right_ee_pos_e_batch = self.initial_right_ee_pos_e_batch
-        initial_right_ee_quat_w_batch = self.initial_right_ee_quat_w_batch
+        initial_left_ee_pos_e = self.initial_left_ee_pos_e
+        initial_left_ee_quat_w = self.initial_left_ee_quat_w
+        initial_right_ee_pos_e = self.initial_right_ee_pos_e
+        initial_right_ee_quat_w = self.initial_right_ee_quat_w
         desired_left_gripper_ids = self.left_gripper_entity_cfg.joint_ids
         desired_right_gripper_ids = self.right_gripper_entity_cfg.joint_ids
+        grasp_pos       = self.object_constants["ready"]["grasp_pos"]
 
         initial_left_ee_pos_b, initial_left_ee_quat_b = self.transform_world_to_base(
-            pos_w =initial_left_ee_pos_e_batch,
-            quat_w=initial_left_ee_quat_w_batch   
+            pos_w =initial_left_ee_pos_e,
+            quat_w=initial_left_ee_quat_w   
         )
         initial_right_ee_pos_b, initial_right_ee_quat_b = self.transform_world_to_base(
-            pos_w =initial_right_ee_pos_e_batch,
-            quat_w=initial_right_ee_quat_w_batch   
+            pos_w =initial_right_ee_pos_e,
+            quat_w=initial_right_ee_quat_w   
         )
 
         desired_left_joint_position, desired_left_joint_ids = self.solve_inverse_kinematics( 
@@ -537,8 +519,8 @@ class DualArmPickAndPlaceFSM:
             target_ee_quat_b=initial_right_ee_quat_b
         )
 
-        desired_left_gripper_position = torch.tensor([[0.035, 0.035]], device=self.device).repeat(num_envs, 1)
-        desired_right_gripper_position = torch.tensor([[0.035, 0.035]], device=self.device).repeat(num_envs, 1)
+        desired_left_gripper_position = torch.tensor([[grasp_pos, grasp_pos]], device=self.device).repeat(num_envs, 1)
+        desired_right_gripper_position = torch.tensor([[grasp_pos, grasp_pos]], device=self.device).repeat(num_envs, 1)
         desired_joint_position = torch.cat(
             [
                 desired_left_joint_position, 
@@ -691,7 +673,7 @@ class DualArmPickAndPlaceFSM:
 
     def _state_twist_insertion(self):
         arm_name = self.active_arm_name
-        ee_pos_w = self.get_active_ee_pos_w()
+        ee_pos_b, _ = self.get_active_ee_pos_quat_b()
         target_place_quat_b = self.target_place_quat_b
 
         rot_deg = 120.0                     # 총 회전 목표 각도
@@ -708,12 +690,7 @@ class DualArmPickAndPlaceFSM:
             arm_joint_ids = self.left_arm_entity_cfg.joint_ids if arm_name == "left" else self.right_arm_entity_cfg.joint_ids
             self.step_initial_joint_pos = self.robot.data.joint_pos[:, arm_joint_ids].clone()
             
-            # 현재 End-Effector의 위치를 기준으로 삽입 목표 위치 설정
-            self.twist_initial_ee_pos_b, self.twist_initial_ee_quat_b = self.transform_world_to_base(
-                ee_pos_w, 
-                self.left_ee_quat_w if arm_name == "left" else self.right_ee_quat_w
-            )
-            self.twist_target_ee_pos_b = self.twist_initial_ee_pos_b.clone()
+            self.twist_target_ee_pos_b = ee_pos_b
             self.twist_target_ee_pos_b[:, 2] -= insertion_depth # 아래로 더 삽입
 
         # 3. 보간(Interpolation) 비율 계산 (0.0 ~ 1.0)
@@ -721,7 +698,7 @@ class DualArmPickAndPlaceFSM:
 
         # 4. 하이브리드 제어: IK(위치) + Joint(회전)
         # A. 위치 제어 (천천히 아래로 삽입)
-        current_ee_pos_b = torch.lerp(self.twist_initial_ee_pos_b, self.twist_target_ee_pos_b, alpha)
+        current_ee_pos_b = torch.lerp(ee_pos_b, self.twist_target_ee_pos_b, alpha)
         
         # B. IK를 통한 기본 관절 각도 계산
         desired_arm_jpos, desired_arm_ids = self.solve_inverse_kinematics(
@@ -768,14 +745,12 @@ class DualArmPickAndPlaceFSM:
 
     def _state_place_complete(self):
         arm_name = self.active_arm_name
-        ee_pos_w = self.get_active_ee_pos_w()
+        ee_pos_b, ee_quat_b = self.get_active_ee_pos_quat_b()
 
         if self.timer == 0:
-            self.fixed_ee_pos_b, self.fixed_ee_quat_b = self.transform_world_to_base(
-                ee_pos_w, 
-                self.left_ee_quat_w if arm_name == "left" else self.right_ee_quat_w
-            )
+            self.fixed_ee_pos_b, self.fixed_ee_quat_b = ee_pos_b, ee_quat_b
             self.fixed_ee_pos_b[:, 2] += 0.1
+
         desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
             arm_name        =arm_name,
             target_ee_pos_b =self.fixed_ee_pos_b, 

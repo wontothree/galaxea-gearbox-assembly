@@ -2,7 +2,7 @@ from .dual_arm_pick_and_place_fsm import DualArmPickAndPlaceFSM
 
 from isaaclab.scene import InteractiveScene
 import isaaclab.sim as sim_utils
-
+from isaaclab.utils.math import subtract_frame_transforms
 from isaaclab.managers import SceneEntityCfg
 
 import isaacsim.core.utils.torch as torch_utils
@@ -112,7 +112,7 @@ class GalaxeaGearboxAssemblyAgent:
         self.target_pin_pos_w = None
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [Function] DualArmPickAndPlaceFSM ----------------------------------------------------------------------------------------------- #
+        # [Function] DualArmPickAndPlaceFSM ---------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         self.joint_pos_command           = None
         self.joint_pos_command_ids       = None
@@ -129,14 +129,21 @@ class GalaxeaGearboxAssemblyAgent:
         # end effector (simulation ground truth)
         left_arm_body_ids    = self.left_arm_entity_cfg.body_ids
         right_arm_body_ids   = self.right_arm_entity_cfg.body_ids
-        self.left_ee_pos_w   = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
-        self.left_ee_quat_w  = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
-        self.right_ee_pos_w  = self.robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
-        self.right_ee_quat_w = self.robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
-
-        # Base
         self.base_pos_w  = self.robot.data.root_state_w[:, 0:3]
-        self.base_quat_w = self.robot.data.root_state_w[:, 3:7]
+        self.base_quat_w = self.robot.data.root_state_w[:, 3:7]        
+
+        left_ee_pos_w   = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
+        left_ee_quat_w  = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
+        right_ee_pos_w  = self.robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
+        right_ee_quat_w = self.robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
+        self.left_ee_pos_b, self.left_ee_quat_b = self.transform_world_to_base(
+            pos_w=left_ee_pos_w,
+            quat_w=left_ee_quat_w
+        )
+        self.right_ee_pos_b, self.right_ee_quat_b = self.transform_world_to_base(
+            pos_w=right_ee_pos_w,
+            quat_w=right_ee_quat_w
+        )
 
     def observe_object_state(self):
         """
@@ -344,12 +351,13 @@ class GalaxeaGearboxAssemblyAgent:
         self.observe_assembly_state()
 
         self.dual_arm_pick_and_place_fsm.update_observation(
-            left_ee_pos_w                    = self.left_ee_pos_w,
-            left_ee_quat_w                   = self.left_ee_quat_w,
-            right_ee_pos_w                   = self.right_ee_pos_w,
-            right_ee_quat_w                  = self.right_ee_quat_w,
+            left_ee_pos_b                    = self.left_ee_pos_b,
+            left_ee_quat_b                   = self.left_ee_quat_b,
+            right_ee_pos_b                   = self.right_ee_pos_b,
+            right_ee_quat_b                  = self.right_ee_quat_b,
             base_pos_w                       = self.base_pos_w,
-            base_quat_w                      = self.base_quat_w,        
+            base_quat_w                      = self.base_quat_w,      
+
             planetary_carrier_pos_w          = self.planetary_carrier_pos_w,
             planetary_carrier_quat_w         = self.planetary_carrier_quat_w,
             ring_gear_pos_w                  = self.ring_gear_pos_w,
@@ -380,3 +388,21 @@ class GalaxeaGearboxAssemblyAgent:
 
         score = self.num_mounted_planetary_gears + int(self.is_sun_gear_mounted) + int(self.is_ring_gear_mounted) + int(self.is_planetary_reducer_mounted)
         print(f"score: {score}")
+
+    def transform_world_to_base( 
+            self,
+            pos_w: torch.Tensor, 
+            quat_w: torch.Tensor
+        ) -> torch.Tensor:
+        """
+        World frame to base frame
+        """
+        base_pos_w = self.base_pos_w
+        base_quat_w = self.base_quat_w
+        pos_b, quat_b = subtract_frame_transforms(
+            base_pos_w,
+            base_quat_w,
+            pos_w,
+            quat_w
+        )
+        return pos_b, quat_b
