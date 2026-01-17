@@ -1,0 +1,5 @@
+sensor_msgs.msg.CameraInfo(header=std_msgs.msg.Header(stamp=builtin_interfaces.msg.Time(sec=0, nanosec=119999997), frame_id='tf_camera'), height=720, width=1280, distortion_model='plumb_bob', d=[0.0, 0.0, 0.0, 0.0, 0.0], k=array([448.15853517,   0.        , 640.        ,   0.        ,
+       448.15853517, 360.        ,   0.        ,   0.        ,
+         1.        ]), r=array([1., 0., 0., 0., 1., 0., 0., 0., 1.]), p=array([448.15853517,   0.        , 640.        ,   0.        ,
+         0.        , 448.15853517, 360.        ,   0.        ,
+         0.        ,   0.        ,   1.        ,   0.        ]), binning_x=0, binning_y=0, roi=sensor_msgs.msg.RegionOfInterest(x_offset=0, y_offset=0, height=0, width=0, do_rectify=False))
