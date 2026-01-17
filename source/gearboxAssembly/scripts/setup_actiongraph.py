@@ -67,16 +67,16 @@ def setup_camera_publishing(prim_path, resolution=(320, 240)):
                     # RGB Helper Configuration
                     ("RGBCameraHelper.inputs:type", "rgb"),
                     ("RGBCameraHelper.inputs:topicName", "/rgb/image_rect_color"),
-                    ("RGBCameraHelper.inputs:frameId", "sim_camera"),
+                    ("RGBCameraHelper.inputs:frameId", "tf_camera"),
 
                     # Camera Info Helper Configuration
                     ("CameraInfoHelper.inputs:topicName", "/rgb/camera_info"),
-                    ("CameraInfoHelper.inputs:frameId", "sim_camera"),
+                    ("CameraInfoHelper.inputs:frameId", "tf_camera"),
 
                     # Depth Helper Configuration (Input type: depth)
                     ("DepthCameraHelper.inputs:type", "depth"),
                     ("DepthCameraHelper.inputs:topicName", "/depth_image"),
-                    ("DepthCameraHelper.inputs:frameId", "sim_camera"),
+                    ("DepthCameraHelper.inputs:frameId", "tf_camera"),
                 ],
             },
         )

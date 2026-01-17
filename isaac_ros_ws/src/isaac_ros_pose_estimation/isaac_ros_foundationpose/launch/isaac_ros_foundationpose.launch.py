@@ -126,7 +126,7 @@ def generate_launch_description():
             'score_output_binding_names': ['output1'],
         }],
         remappings=[
-            ('pose_estimation/depth_image', 'depth_registered/image_rect'),
+            ('pose_estimation/depth_image', 'depth_image'),
             ('pose_estimation/image', 'rgb/image_rect_color'),
             ('pose_estimation/camera_info', 'rgb/camera_info'),
             ('pose_estimation/segmentation', 'segmentation'),
