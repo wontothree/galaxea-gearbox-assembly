@@ -43,6 +43,8 @@ def main():
     print(f"[INFO] Action space  : {env.action_space}")
 
     env.reset()
+    for _ in range(2):
+        env.step(torch.zeros(env.action_space.shape, device=env.unwrapped.device))
 
     # Simulation loop
     while simulation_app.is_running():
