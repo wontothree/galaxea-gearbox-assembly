@@ -120,12 +120,15 @@ class ContainerInterface:
             # Create the file with sticky bit on the group
             container_history_file.touch(mode=0o2644, exist_ok=True)
 
+        project_name = f"isaac-lab-{self.suffix}" if self.suffix else "isaac-lab"
+
         # build the image for the base profile if not running base (up will build base already if profile is base)
         if self.profile != "base":
             subprocess.run(
                 [
                     "docker",
                     "compose",
+                    "-p", project_name,
                     "--file",
                     "docker-compose.yaml",
                     "--env-file",
@@ -140,7 +143,7 @@ class ContainerInterface:
 
         # build the image for the profile
         subprocess.run(
-            ["docker", "compose"]
+            ["docker", "compose", "-p", project_name]
             + self.add_yamls
             + self.add_profiles
             + self.add_env_files

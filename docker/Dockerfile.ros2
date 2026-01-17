@@ -62,6 +62,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-vision-msgs \
     ros-jazzy-rmw-cyclonedds-cpp \
     ros-jazzy-rmw-fastrtps-cpp \
+    ros-jazzy-rviz2 && \
     ros-dev-tools && \
     ${ISAACLAB_PATH}/isaaclab.sh -p ${ISAACLAB_PATH}/tools/install_deps.py rosdep ${ISAACLAB_PATH}/source && \
     apt -y autoremove && apt clean autoclean && \
@@ -69,3 +70,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     echo "source /opt/ros/jazzy/setup.bash" >> ${HOME}/.bashrc
 
 COPY docker/.ros/ ${DOCKER_USER_HOME}/.ros/
+
+# Sets the working directory for the container
+WORKDIR /workspace/isaaclab/source/gearboxAssembly
