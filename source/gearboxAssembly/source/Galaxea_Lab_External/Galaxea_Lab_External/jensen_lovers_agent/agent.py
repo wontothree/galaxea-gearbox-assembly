@@ -252,6 +252,9 @@ class GalaxeaGearboxAssemblyAgent:
             self.pin_positions_w.append(pin_pos)
             self.pin_quats_w.append(pin_quat)
 
+        # Debug: Print ground truth positions (will get overwritten)
+        # self.print_gear_groundtruth()
+
         # -------------------------------------------------------------------------------------------------------------------------- #
         # 1. Capture and Process Vision Data
         if not self.render_product:
@@ -326,9 +329,8 @@ class GalaxeaGearboxAssemblyAgent:
         self.ring_gear_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
         self.planetary_reducer_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
 
-        # Compare results
-        self.vision.print_summary()
-        self.print_gear_groundtruth()
+        # Debug
+        # self.vision.print_summary()
 
     def observe_assembly_state(self):
         # Observe object state

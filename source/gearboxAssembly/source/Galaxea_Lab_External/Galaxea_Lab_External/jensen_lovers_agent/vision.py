@@ -24,6 +24,15 @@ class TableSceneAnalyzer:
         self.base_offset_y = -0.0015
         self.base_z_ref = 0.902
 
+        # Add this dictionary here:
+        self.z_offsets = {
+            "Ring Gear": 0.0000,
+            "Planetary Carrier": -0.0010,
+            "Sun Planetary Gear": -0.0134,
+            "Planetary Reducer": -0.0909,
+            "Carrier Pin": -0.0320
+        }
+
         self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_dir = f"run_{self.run_id}"
         os.makedirs(self.output_dir, exist_ok=True)
@@ -105,6 +114,10 @@ class TableSceneAnalyzer:
                 
                 # Extract Z from height map and calculate full base coordinates
                 pz = float(height_map[v_p - y, u_p - x])
+
+                # --- ADD OFFSET CORRECTION ---
+                pz += self.z_offsets.get("Carrier Pin", 0.0)
+                
                 px, py, _ = self.get_base_coordinates(u_p, v_p, float(depth_map[v_p, u_p]))
                 
                 pin_data = {'label': "Carrier Pin", 'x': round(px, 4), 'y': round(py, 4), 'z': round(pz, 4)}
@@ -148,6 +161,9 @@ class TableSceneAnalyzer:
                 _, _, w_px, h_px = cv2.boundingRect(cnt)
                 area_cm2 = (w_px * z_m / self.fx * 100) * (h_px * z_m / self.fy * 100)
                 label = self.classify_gear(area_cm2)
+
+                # --- OFFSET CORRECTION  ---
+                z += self.z_offsets.get(label, 0.0)
 
                 obj_data = {'label': label, 'x': round(x, 4), 'y': round(y, 4), 'z': round(z, 4)}
                 self.detected_objects.append(obj_data)
