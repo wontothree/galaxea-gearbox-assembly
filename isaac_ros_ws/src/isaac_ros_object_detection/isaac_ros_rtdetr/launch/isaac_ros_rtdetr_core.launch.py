@@ -25,6 +25,7 @@ from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 
 MODEL_INPUT_SIZE = 640  # RT-DETR models expect 640x640 encoded image size
+MODEL_INPUT_HEIGHT = 640 # To account for [component_container_mt-1] [1;31m2026-01-18 05:02:16.886 ERROR ./gxf/extensions/tensor_rt/tensor_rt_inference.cpp@600: Input Tensor images bound to images: dimensions does not meet model spec with relaxed matching. Expected: [-1, 3, 480, 640] Real: [1, 3, 640, 640][0m
 MODEL_NUM_CHANNELS = 3  # RT-DETR models expect 3 image channels
 
 
@@ -55,7 +56,7 @@ class IsaacROSRtDetrLaunchFragment(IsaacROSLaunchFragment):
                     'input_width': interface_specs['camera_resolution']['width'],
                     'input_height': interface_specs['camera_resolution']['height'],
                     'output_width': MODEL_INPUT_SIZE,
-                    'output_height': MODEL_INPUT_SIZE,
+                    'output_height': MODEL_INPUT_HEIGHT,
                     'keep_aspect_ratio': True,
                     'encoding_desired': 'rgb8',
                     'disable_padding': True
@@ -63,6 +64,8 @@ class IsaacROSRtDetrLaunchFragment(IsaacROSLaunchFragment):
                 remappings=[
                     ('image', 'image_rect'),
                     ('camera_info', 'camera_info_rect')
+                    # ('image', '/rgb/image_rect_color'),
+                    # ('camera_info', '/rgb/camera_info')
                 ]
             ),
             'pad_node': ComposableNode(
@@ -71,7 +74,7 @@ class IsaacROSRtDetrLaunchFragment(IsaacROSLaunchFragment):
                 plugin='nvidia::isaac_ros::image_proc::PadNode',
                 parameters=[{
                     'output_image_width': MODEL_INPUT_SIZE,
-                    'output_image_height': MODEL_INPUT_SIZE,
+                    'output_image_height': MODEL_INPUT_HEIGHT,
                     'padding_type': 'BOTTOM_RIGHT'
                 }],
                 remappings=[(
@@ -85,7 +88,7 @@ class IsaacROSRtDetrLaunchFragment(IsaacROSLaunchFragment):
                 parameters=[{
                         'encoding_desired': 'rgb8',
                         'image_width': MODEL_INPUT_SIZE,
-                        'image_height': MODEL_INPUT_SIZE
+                        'image_height': MODEL_INPUT_HEIGHT
                 }],
                 remappings=[
                     ('image_raw', 'padded_image'),
@@ -109,7 +112,7 @@ class IsaacROSRtDetrLaunchFragment(IsaacROSLaunchFragment):
                 package='isaac_ros_tensor_proc',
                 plugin='nvidia::isaac_ros::dnn_inference::InterleavedToPlanarNode',
                 parameters=[{
-                    'input_tensor_shape': [MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, MODEL_NUM_CHANNELS]
+                    'input_tensor_shape': [MODEL_INPUT_HEIGHT, MODEL_INPUT_SIZE, MODEL_NUM_CHANNELS]
                 }],
                 remappings=[
                     ('interleaved_tensor', 'normalized_tensor')
@@ -121,9 +124,9 @@ class IsaacROSRtDetrLaunchFragment(IsaacROSLaunchFragment):
                 plugin='nvidia::isaac_ros::dnn_inference::ReshapeNode',
                 parameters=[{
                     'output_tensor_name': 'input_tensor',
-                    'input_tensor_shape': [MODEL_NUM_CHANNELS, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE],
+                    'input_tensor_shape': [MODEL_NUM_CHANNELS, MODEL_INPUT_HEIGHT, MODEL_INPUT_SIZE],
                     'output_tensor_shape': [
-                        1, MODEL_NUM_CHANNELS, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]
+                        1, MODEL_NUM_CHANNELS, MODEL_INPUT_HEIGHT, MODEL_INPUT_SIZE]
                 }],
                 remappings=[
                     ('tensor', 'planar_tensor')
