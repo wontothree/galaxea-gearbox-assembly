@@ -134,6 +134,12 @@ class GalaxeaGearboxAssemblyAgent:
         self.target_sun_planetary_gear_quat_w = None
         self.target_pin_pos_w = None
 
+        # add
+        self._force_planetary_gears_mounted = 0
+        self._force_sun_gear_mounted = False
+        self._force_ring_gear_mounted = False
+        self._force_planetary_reducer_mounted = False
+
         # -------------------------------------------------------------------------------------------------------------------------- #
         # [Function] DualArmPickAndPlaceFSM ---------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
@@ -158,6 +164,13 @@ class GalaxeaGearboxAssemblyAgent:
             # Taking the first element [0] assuming batch size 1 or showing first env
             coords = pos[0].cpu().numpy()
             name = f"Sun Planetary Gear {i+1}"
+            print(f"{name:<25} | {coords[0]:8.3f} {coords[1]:8.3f} {coords[2]:8.3f}")
+
+        # 1. Print Pin locations
+        for i, pos in enumerate(self.pin_positions_w):
+            # Taking the first element [0] assuming batch size 1 or showing first env
+            coords = pos[0].cpu().numpy()
+            name = f"Pin {i+1}"
             print(f"{name:<25} | {coords[0]:8.3f} {coords[1]:8.3f} {coords[2]:8.3f}")
 
         # 2. Print Other Major Components
@@ -315,12 +328,12 @@ class GalaxeaGearboxAssemblyAgent:
             ]
 
         # 5. Handle Pins
-        if found_pins:
-            self.pin_positions_w = found_pins
-            self.pin_quats_w = [
-                torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device) 
-                for _ in range(len(found_pins))
-            ]
+        # if found_pins:
+        #     self.pin_positions_w = found_pins
+        #     self.pin_quats_w = [
+        #         torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device) 
+        #         for _ in range(len(found_pins))
+        #     ]
 
         # 6. Fallback/Consistency: Keep Quaternions for Single Components
         # Since TableSceneAnalyzer doesn't return Quaternions, we default them to identity

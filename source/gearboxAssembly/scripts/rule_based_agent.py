@@ -57,16 +57,16 @@ def main():
     env.reset()
 
     # Setup ROS2 Action Graph
-    try:
-        initialize_ros2_environment()
-        # Setup Camera Publishing (after the scene is loaded)
-        camera_path = '/World/envs/env_0/Robot/zed_link/head_cam/head_cam'
-        setup_camera_publishing(camera_path)
-        # pass
-    except Exception as e:
-        print(f"[ERROR] Failed to setup ROS2 Action Graph: {e}")
-        env.close()
-        return
+    # try:
+    #     initialize_ros2_environment()
+    #     # Setup Camera Publishing (after the scene is loaded)
+    #     camera_path = '/World/envs/env_0/Robot/zed_link/head_cam/head_cam'
+    #     setup_camera_publishing(camera_path)
+    #     # pass
+    # except Exception as e:
+    #     print(f"[ERROR] Failed to setup ROS2 Action Graph: {e}")
+    #     env.close()
+    #     return
 
     # simulate environment
     while simulation_app.is_running():
