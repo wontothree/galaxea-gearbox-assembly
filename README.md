@@ -181,3 +181,10 @@ python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 
 This project is tested in the environment of Docker and Window 11.
 
 ---
+
+# Memo
+
+```bash
+scripts/rule_based_agent.py # ros dependency
+scripts/jensen_lovers_agent.py # no ros dependency
+```
