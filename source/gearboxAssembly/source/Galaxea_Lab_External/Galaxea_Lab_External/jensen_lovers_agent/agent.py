@@ -1,5 +1,5 @@
 from .dual_arm_pick_and_place_fsm import DualArmPickAndPlaceFSM
-from .vision import TableSceneAnalyzer
+# from .vision import TableSceneAnalyzer
 
 from isaaclab.scene import InteractiveScene
 import isaaclab.sim as sim_utils
@@ -79,25 +79,25 @@ class GalaxeaGearboxAssemblyAgent:
         self.planetary_reducer_quat_w = None
         self.pin_positions_w = []
         self.pin_quats_w = []
-        self.vision = TableSceneAnalyzer()
+        # self.vision = TableSceneAnalyzer()
 
-        # --- NEW: Direct Camera Setup ---
-        # --- Direct Camera Setup via Replicator ---
-        self.camera_prim_path = '/World/envs/env_0/Robot/zed_link/head_cam/head_cam'
-        self.render_product = None
+        # # --- NEW: Direct Camera Setup ---
+        # # --- Direct Camera Setup via Replicator ---
+        # self.camera_prim_path = '/World/envs/env_0/Robot/zed_link/head_cam/head_cam'
+        # self.render_product = None
         
-        if is_prim_path_valid(self.camera_prim_path):
-            # Create a render product for the specific camera prim
-            self.render_product = rep.create.render_product(self.camera_prim_path, resolution=(1280, 720))
-            # Initialize the annotators we need
-            self.rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb")
-            self.depth_annotator = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+        # if is_prim_path_valid(self.camera_prim_path):
+        #     # Create a render product for the specific camera prim
+        #     self.render_product = rep.create.render_product(self.camera_prim_path, resolution=(1280, 720))
+        #     # Initialize the annotators we need
+        #     self.rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb")
+        #     self.depth_annotator = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
             
-            # Attach the annotators to the render product
-            self.rgb_annotator.attach(self.render_product)
-            self.depth_annotator.attach(self.render_product)
-        else:
-            print(f"[Warning] Camera prim path {self.camera_prim_path} is invalid!")
+        #     # Attach the annotators to the render product
+        #     self.rgb_annotator.attach(self.render_product)
+        #     self.depth_annotator.attach(self.render_product)
+        # else:
+        #     print(f"[Warning] Camera prim path {self.camera_prim_path} is invalid!")
         # -------------------------------------------------------------------------------------------------------------------------- #
         # [Function] observe_assembly_state ---------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
@@ -255,82 +255,83 @@ class GalaxeaGearboxAssemblyAgent:
         # Debug: Print ground truth positions (will get overwritten)
         # self.print_gear_groundtruth()
 
-        # -------------------------------------------------------------------------------------------------------------------------- #
-        # 1. Capture and Process Vision Data
-        if not self.render_product:
-            print("[Error] Render product not initialized. Cannot use vision.")
-            return
+        # # -------------------------------------------------------------------------------------------------------------------------- #
+        # # 1. Capture and Process Vision Data
+        # if not self.render_product:
+        #     print("[Error] Render product not initialized. Cannot use vision.")
+        #     return
 
-        rgb_data = self.rgb_annotator.get_data()
-        depth_data = self.depth_annotator.get_data()
+        # rgb_data = self.rgb_annotator.get_data()
+        # depth_data = self.depth_annotator.get_data()
 
-        if rgb_data is None or depth_data is None or rgb_data.size == 0:
-            return
+        # if rgb_data is None or depth_data is None or rgb_data.size == 0:
+        #     return
 
-        # Handle RGBA if necessary
-        if rgb_data.shape[-1] == 4:
-            rgb_data = rgb_data[:, :, :3]
+        # # Handle RGBA if necessary
+        # if rgb_data.shape[-1] == 4:
+        #     rgb_data = rgb_data[:, :, :3]
         
-        # This populates self.vision.detected_objects
-        self.vision.process_frame(rgb_data, depth_data)
-        detected_list = self.vision.detected_objects
-        # 2. Reset / Prepare State Variables
-        # We use a default Z or previous state if an object is temporarily occluded
-        def to_torch(coords):
-            return torch.tensor([[coords['x'], coords['y'], coords['z']]], device=self.device)
+        # # This populates self.vision.detected_objects
+        # self.vision.process_frame(rgb_data, depth_data)
+        # detected_list = self.vision.detected_objects
+        # # 2. Reset / Prepare State Variables
+        # # We use a default Z or previous state if an object is temporarily occluded
+        # def to_torch(coords):
+        #     return torch.tensor([[coords['x'], coords['y'], coords['z']]], device=self.device)
 
-        # Temporary lists for multi-instance objects
-        found_sun_gears = []
-        found_pins = []
+        # # Temporary lists for multi-instance objects
+        # found_sun_gears = []
+        # found_pins = []
 
-        # 3. Map Vision Labels to Agent Variables
-        for obj in detected_list:
-            label = obj['label']
+        # # 3. Map Vision Labels to Agent Variables
+        # for obj in detected_list:
+        #     label = obj['label']
             
-            if label == "Planetary Carrier":
-                self.planetary_carrier_pos_w = to_torch(obj)
+        #     if label == "Planetary Carrier":
+        #         self.planetary_carrier_pos_w = to_torch(obj)
             
-            elif label == "Ring Gear":
-                self.ring_gear_pos_w = to_torch(obj)
+        #     elif label == "Ring Gear":
+        #         self.ring_gear_pos_w = to_torch(obj)
             
-            elif label == "Planetary Reducer":
-                self.planetary_reducer_pos_w = to_torch(obj)
+        #     elif label == "Planetary Reducer":
+        #         self.planetary_reducer_pos_w = to_torch(obj)
             
-            elif label == "Sun Planetary Gear":
-                found_sun_gears.append(to_torch(obj))
+        #     elif label == "Sun Planetary Gear":
+        #         found_sun_gears.append(to_torch(obj))
                 
-            elif label == "Carrier Pin":
-                found_pins.append(to_torch(obj))
+        #     elif label == "Carrier Pin":
+        #         found_pins.append(to_torch(obj))
 
-        # 4. Handle Sun Planetary Gears (Sort or assign to the 4 specific slots)
-        # Note: Vision doesn't know 'gear_1' vs 'gear_2', so we update the list 
-        # based on what is currently visible on the table.
-        if found_sun_gears:
-            self.sun_planetary_gear_positions_w = found_sun_gears
-            # Vision currently does not provide 3D orientation (Quaternions), 
-            # so we assume identity (upright) for assembly logic.
-            self.sun_planetary_gear_quats_w = [
-                torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device) 
-                for _ in range(len(found_sun_gears))
-            ]
+        # # 4. Handle Sun Planetary Gears (Sort or assign to the 4 specific slots)
+        # # Note: Vision doesn't know 'gear_1' vs 'gear_2', so we update the list 
+        # # based on what is currently visible on the table.
+        # if found_sun_gears:
+        #     self.sun_planetary_gear_positions_w = found_sun_gears
+        #     # Vision currently does not provide 3D orientation (Quaternions), 
+        #     # so we assume identity (upright) for assembly logic.
+        #     self.sun_planetary_gear_quats_w = [
+        #         torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device) 
+        #         for _ in range(len(found_sun_gears))
+        #     ]
 
-        # 5. Handle Pins
-        if found_pins:
-            self.pin_positions_w = found_pins
-            self.pin_quats_w = [
-                torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device) 
-                for _ in range(len(found_pins))
-            ]
+        # # 5. Handle Pins
+        # if found_pins:
+        #     self.pin_positions_w = found_pins
+        #     self.pin_quats_w = [
+        #         torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device) 
+        #         for _ in range(len(found_pins))
+        #     ]
 
-        # 6. Fallback/Consistency: Keep Quaternions for Single Components
-        # Since TableSceneAnalyzer doesn't return Quaternions, we default them to identity
-        # so the FSM doesn't crash.
-        self.planetary_carrier_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
-        self.ring_gear_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
-        self.planetary_reducer_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
+        # # 6. Fallback/Consistency: Keep Quaternions for Single Components
+        # # Since TableSceneAnalyzer doesn't return Quaternions, we default them to identity
+        # # so the FSM doesn't crash.
+        # self.planetary_carrier_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
+        # self.ring_gear_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
+        # self.planetary_reducer_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
 
         # Debug
         # self.vision.print_summary()
+
 
     def observe_assembly_state(self):
         # Observe object state
