@@ -332,6 +332,7 @@ class GalaxeaGearboxAssemblyAgent:
         # # Debug
         # # self.vision.print_summary()
 
+
     def observe_assembly_state(self):
         # Observe object state
         self.observe_object_state()
