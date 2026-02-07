@@ -14,10 +14,7 @@
 [RoCo Challenge@AAAI 2026](https://rocochallenge.github.io/RoCo2026/doc.html)
 
 
-<video src="./docs/images/demo.mp4"
-       controls
-       width="700">
-</video>
+https://github.com/user-attachments/assets/25673b1a-7499-461b-abfd-b341789ee4e2
 
 --- 
 
@@ -58,7 +55,7 @@ python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v
 
 # 🚀 Getting Started
 
-## [Docker 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
+### [Docker 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
 
 1. Create the container or run the container
 
@@ -123,7 +120,7 @@ source /opt/ros/jazzy/setup.bash
 ros2 topic list
 ```
 
-## [Docker 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
+### [Docker 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
 
 1. Build the Docker image of Isaac ROS and run the container
 
