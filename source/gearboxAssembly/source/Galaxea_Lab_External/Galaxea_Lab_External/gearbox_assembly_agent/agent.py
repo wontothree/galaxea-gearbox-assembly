@@ -65,6 +65,10 @@ class GalaxeaGearboxAssemblyAgent:
         self.base_pos_w = None
         self.base_quat_w = None
         self.current_left_gripper_state = None
+        self.left_arm_joint_pos = None
+        self.right_arm_joint_pos = None
+        self.left_arm_jacobian = None
+        self.right_arm_jacobian = None
 
         # -------------------------------------------------------------------------------------------------------------------------- #
         # [Function] observe_object_state ------------------------------------------------------------------------------------------ #
@@ -142,54 +146,26 @@ class GalaxeaGearboxAssemblyAgent:
         self.dual_arm_pick_and_place_fsm = DualArmPickAndPlaceFSM(scene=scene, device=self.device)
         self.state = None
 
-    def print_gear_groundtruth(self):
-        """
-        Prints the ground truth positions of the planetary gear system components
-        in a structured and readable format.
-        """
-        print("\n" + "="*50)
-        print(f"{'GEAR SYSTEM GROUND TRUTH (Positions)':^50}")
-        print("="*50)
-        print(f"{'Component':<25} | {'X':>7} {'Y':>8} {'Z':>8}")
-        print("-"*50)
-
-        # 1. Print Sun Planetary Gears
-        for i, pos in enumerate(self.sun_planetary_gear_positions_w):
-            # Taking the first element [0] assuming batch size 1 or showing first env
-            coords = pos[0].cpu().numpy()
-            name = f"Sun Planetary Gear {i+1}"
-            print(f"{name:<25} | {coords[0]:8.3f} {coords[1]:8.3f} {coords[2]:8.3f}")
-
-        # 2. Print Other Major Components
-        components = [
-            ("Planetary Carrier", self.planetary_carrier_pos_w),
-            ("Ring Gear",         self.ring_gear_pos_w),
-            ("Planetary Reducer", self.planetary_reducer_pos_w)
-        ]
-
-        for name, pos in components:
-            coords = pos[0].cpu().numpy()
-            print(f"{name:<25} | {coords[0]:8.3f} {coords[1]:8.3f} {coords[2]:8.3f}")
-
-        print("="*50 + "\n")
-
     def observe_robot_state(self):
         """
         update robot state: simulation ground truth
         """
         # Used member variables
         env_origins = self.scene.env_origins
+        robot = self.robot
 
         # end effector (simulation ground truth)
         left_arm_body_ids    = self.left_arm_entity_cfg.body_ids
         right_arm_body_ids   = self.right_arm_entity_cfg.body_ids
-        self.base_pos_w  = self.robot.data.root_state_w[:, 0:3]
-        self.base_quat_w = self.robot.data.root_state_w[:, 3:7]        
+        left_arm_joint_ids   = self.left_arm_entity_cfg.joint_ids
+        right_arm_joint_ids  = self.right_arm_entity_cfg.joint_ids
+        self.base_pos_w  = robot.data.root_state_w[:, 0:3]
+        self.base_quat_w = robot.data.root_state_w[:, 3:7]        
 
-        left_ee_pos_w   = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
-        left_ee_quat_w  = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
-        right_ee_pos_w  = self.robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
-        right_ee_quat_w = self.robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
+        left_ee_pos_w   = robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
+        left_ee_quat_w  = robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
+        right_ee_pos_w  = robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
+        right_ee_quat_w = robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
         self.left_ee_pos_b, self.left_ee_quat_b = self.transform_world_to_base(
             pos_w=left_ee_pos_w,
             quat_w=left_ee_quat_w
@@ -198,6 +174,21 @@ class GalaxeaGearboxAssemblyAgent:
             pos_w=right_ee_pos_w,
             quat_w=right_ee_quat_w
         )
+
+        self.left_arm_joint_pos = robot.data.joint_pos[
+            :, left_arm_joint_ids
+        ]
+        self.right_arm_joint_pos = robot.data.joint_pos[
+            :, right_arm_joint_ids
+        ]
+
+        self.left_arm_jacobian = robot.root_physx_view.get_jacobians()[
+            :, left_arm_body_ids[0] - 1, :, left_arm_joint_ids
+        ]
+        self.right_arm_jacobian = robot.root_physx_view.get_jacobians()[
+            :, right_arm_body_ids[0] - 1, :, right_arm_joint_ids
+        ]
+
 
     def observe_object_state(self):
         """
@@ -491,8 +482,12 @@ class GalaxeaGearboxAssemblyAgent:
             right_ee_pos_b                   = self.right_ee_pos_b,
             right_ee_quat_b                  = self.right_ee_quat_b,
             base_pos_w                       = self.base_pos_w,
-            base_quat_w                      = self.base_quat_w,      
-
+            base_quat_w                      = self.base_quat_w,  
+            left_arm_joint_pos               = self.left_arm_joint_pos,
+            right_arm_joint_pos              = self.right_arm_joint_pos,  
+            left_arm_jacobian                = self.left_arm_jacobian,  
+            right_arm_jacobian               = self.right_arm_jacobian,
+            
             planetary_carrier_pos_w          = self.planetary_carrier_pos_w,
             planetary_carrier_quat_w         = self.planetary_carrier_quat_w,
             ring_gear_pos_w                  = self.ring_gear_pos_w,
@@ -541,3 +536,34 @@ class GalaxeaGearboxAssemblyAgent:
             quat_w
         )
         return pos_b, quat_b
+
+    def print_gear_groundtruth(self):
+        """
+        Prints the ground truth positions of the planetary gear system components
+        in a structured and readable format.
+        """
+        print("\n" + "="*50)
+        print(f"{'GEAR SYSTEM GROUND TRUTH (Positions)':^50}")
+        print("="*50)
+        print(f"{'Component':<25} | {'X':>7} {'Y':>8} {'Z':>8}")
+        print("-"*50)
+
+        # 1. Print Sun Planetary Gears
+        for i, pos in enumerate(self.sun_planetary_gear_positions_w):
+            # Taking the first element [0] assuming batch size 1 or showing first env
+            coords = pos[0].cpu().numpy()
+            name = f"Sun Planetary Gear {i+1}"
+            print(f"{name:<25} | {coords[0]:8.3f} {coords[1]:8.3f} {coords[2]:8.3f}")
+
+        # 2. Print Other Major Components
+        components = [
+            ("Planetary Carrier", self.planetary_carrier_pos_w),
+            ("Ring Gear",         self.ring_gear_pos_w),
+            ("Planetary Reducer", self.planetary_reducer_pos_w)
+        ]
+
+        for name, pos in components:
+            coords = pos[0].cpu().numpy()
+            print(f"{name:<25} | {coords[0]:8.3f} {coords[1]:8.3f} {coords[2]:8.3f}")
+
+        print("="*50 + "\n")
