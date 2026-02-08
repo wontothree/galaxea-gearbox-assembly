@@ -15,7 +15,7 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import sample_uniform
 
-from .galaxea_lab_external_env_cfg import GalaxeaLabExternalEnvCfg
+from .test_cfg import GalaxeaLabExternalEnvCfg
 
 from pxr import Usd, Sdf, UsdPhysics, UsdGeom
 from isaaclab.sim.spawners.materials import physics_materials, physics_materials_cfg

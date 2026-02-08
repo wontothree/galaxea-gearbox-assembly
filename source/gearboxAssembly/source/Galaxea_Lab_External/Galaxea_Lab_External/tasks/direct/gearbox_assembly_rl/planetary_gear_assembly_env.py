@@ -23,6 +23,9 @@ from isaaclab.markers.config import FRAME_MARKER_CFG
 from .planetary_gear_assembly_env_cfg import PlanetaryGearAssemblyEnvCfg
 from . import gearbox_assembly_utils
 
+from ....gearbox_assembly_agent.agent import GalaxeaGearboxAssemblyAgent
+from ....gearbox_assembly_agent.assembly_fsm import StateMachine, Context, InitializationState
+
 class PlanetaryGearAssemblyEnv(DirectRLEnv):
     cfg: PlanetaryGearAssemblyEnvCfg
 
@@ -94,6 +97,26 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         
         # Initialize visualization markers for pins
         self._setup_markers()
+
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        # Constants
+        # -------------------------------------------------------------------------------------------------------------------------- #
+        self.initial_left_ee_pos_e         = torch.tensor([[0.3864, 0.5237, 1.1475]], device=self.device) - self.scene.env_origins
+        self.initial_left_ee_quat_w        = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device).repeat(self.scene.num_envs, 1)
+        self.initial_right_ee_pos_e        = torch.tensor([[0.3864, -0.5237, 1.1475]], device=self.device) - self.scene.env_origins
+        self.initial_right_ee_quat_w       = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device).repeat(self.scene.num_envs, 1)
+
+        # ------------------------------------------------------
+        self.agent = GalaxeaGearboxAssemblyAgent(
+            sim=sim_utils.SimulationContext.instance(),
+            scene=self.scene,
+            obj_dict=self.obj_dict
+        )
+        self.context = Context(sim_utils.SimulationContext.instance(), self.agent)
+        initial_state = InitializationState()
+        fsm = StateMachine(initial_state, self.context)
+        self.context.fsm = fsm
+        # ------------------------------------------------------
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -452,12 +475,57 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
 
         return initial_root_state
 
+    # def _reset_idx(self, env_ids: Sequence[int] | None):
+    #     if env_ids is None:
+    #         env_ids = self.robot._ALL_INDICES
+    #     super()._reset_idx(env_ids)
+
+    #     # Randomize object positions (only planetary_carrier and sun_planetary_gear_4)
+    #     self.initial_root_state = self._randomize_object_positions([
+    #         self.planetary_carrier,
+    #         self.sun_planetary_gear_4
+    #     ], [
+    #         'planetary_carrier',
+    #         'sun_planetary_gear_4'
+    #     ])
+
+    #     # Set robot to default pose first
+    #     joint_pos = self.robot.data.default_joint_pos[env_ids][:, self._joint_idx]
+    #     default_root_state = self.robot.data.default_root_state[env_ids]
+    #     default_root_state[:, :3] += self.scene.env_origins[env_ids]
+
+    #     self.joint_pos[env_ids] = joint_pos
+    #     self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
+    #     self.robot.write_joint_position_to_sim(joint_pos, self._joint_idx, env_ids)
+    #     self.robot.set_joint_position_target(joint_pos, self._joint_idx, env_ids)
+        
+    #     # Initialize gripper to open position
+    #     gearbox_assembly_utils.set_gripper_open(
+    #         self.robot, self.ctrl_target_joint_pos, self._left_gripper_dof_idx, env_ids
+    #     )
+    #     self._step_sim_no_action()
+        
+    #     # Perform grasp initialization (Factory-style)
+    #     gearbox_assembly_utils.initialize_grasp(
+    #         self, env_ids, self.sun_planetary_gear_4,
+    #         grasp_height_offset=0.18, held_offset_z=0.07, grasp_duration=0.4
+    #     )
+        
+    #     # Align EEF with first pin position at episode start
+    #     self._align_eef_with_pin(env_ids)
+        
+    #     # Compute EE state after alignment to get accurate positions
+    #     self._compute_ee_state_for_ik()
+        
+    #     # Initialize previous EE state for velocity computation (must be after alignment)
+    #     self.prev_left_ee_pos[env_ids] = self.left_ee_pos_e[env_ids].clone()
+    #     self.prev_left_ee_quat[env_ids] = self.left_ee_quat_w[env_ids].clone()
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
 
-        # Randomize object positions (only planetary_carrier and sun_planetary_gear_4)
+        # 1. 객체 위치 랜덤화 (planetary_carrier 및 sun_planetary_gear_4)
         self.initial_root_state = self._randomize_object_positions([
             self.planetary_carrier,
             self.sun_planetary_gear_4
@@ -466,37 +534,66 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
             'sun_planetary_gear_4'
         ])
 
-        # Set robot to default pose first
-        joint_pos = self.robot.data.default_joint_pos[env_ids][:, self._joint_idx]
-        default_root_state = self.robot.data.default_root_state[env_ids]
-        default_root_state[:, :3] += self.scene.env_origins[env_ids]
+        # 2. 제공된 텐서 좌표를 기반으로 로봇의 초기 관절 자세 계산 (IK 활용)
+        # 환경별 원점 좌표를 더해 세계 좌표계(World)로 변환
+        target_left_ee_pos_w = self.initial_left_ee_pos_e.repeat(len(env_ids), 1) + self.scene.env_origins[env_ids]
+        target_left_ee_quat_w = self.initial_left_ee_quat_w[env_ids]
 
-        self.joint_pos[env_ids] = joint_pos
-        self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
-        self.robot.write_joint_position_to_sim(joint_pos, self._joint_idx, env_ids)
-        self.robot.set_joint_position_target(joint_pos, self._joint_idx, env_ids)
+        # 로봇 베이스(Root) 기준 좌표계로 변환
+        root_pose_w = self.robot.data.root_pose_w[env_ids]
+        target_ee_pos_b, target_ee_quat_b = subtract_frame_transforms(
+            root_pose_w[:, 0:3], root_pose_w[:, 3:7],
+            target_left_ee_pos_w, target_left_ee_quat_w
+        )
+
+        # 현재 관절 상태를 바탕으로 해당 포즈를 취하기 위한 관절 각도(IK) 도출
+        left_jacobian = self.robot.root_physx_view.get_jacobians()[env_ids, self.left_ee_jacobi_idx, :, :][:, :, self._left_arm_joint_idx]
+        current_joint_pos = self.robot.data.default_joint_pos[env_ids][:, self._left_arm_joint_idx]
         
-        # Initialize gripper to open position
+        self.left_diff_ik_controller.set_command(torch.cat([target_ee_pos_b, target_ee_quat_b], dim=-1))
+        joint_pos_init = self.left_diff_ik_controller.compute(
+            target_ee_pos_b, target_ee_quat_b, left_jacobian, current_joint_pos
+        )
+
+        # 계산된 각도를 로봇 버퍼에 적용 (나머지 관절은 기본값 유지)
+        self.joint_pos[env_ids] = self.robot.data.default_joint_pos[env_ids][:, self._joint_idx]
+        self.joint_pos[env_ids][:, :len(self._left_arm_joint_idx)] = joint_pos_init
+
+        # 로봇을 해당 위치로 '순간이동' 시키고 모든 속도(관성)를 0으로 초기화
+        zero_vel = torch.zeros_like(self.joint_pos[env_ids])
+        self.robot.write_joint_state_to_sim(self.joint_pos[env_ids], zero_vel, self._joint_idx, env_ids)
+        self.robot.set_joint_position_target(self.joint_pos[env_ids], self._joint_idx, env_ids)
+        
+        # 3. 그리퍼 개방 및 물리 엔진 안정화
         gearbox_assembly_utils.set_gripper_open(
             self.robot, self.ctrl_target_joint_pos, self._left_gripper_dof_idx, env_ids
         )
         self._step_sim_no_action()
         
-        # Perform grasp initialization (Factory-style)
+        # 4. 강제 파지 초기화 (ARCH 시스템의 저수준 프리미티브 설정) [cite: 11]
         gearbox_assembly_utils.initialize_grasp(
             self, env_ids, self.sun_planetary_gear_4,
             grasp_height_offset=0.18, held_offset_z=0.07, grasp_duration=0.4
         )
         
-        # Align EEF with first pin position at episode start
+        # 5. 목표 핀 상공(15cm)으로 정렬 이동
         self._align_eef_with_pin(env_ids)
         
-        # Compute EE state after alignment to get accurate positions
+        # 6. 최종 상태 업데이트 및 드리프트(Drifting) 방지 잠금
         self._compute_ee_state_for_ik()
         
-        # Initialize previous EE state for velocity computation (must be after alignment)
+        # 다음 스텝 속도 계산을 위한 이전 포즈 기록
         self.prev_left_ee_pos[env_ids] = self.left_ee_pos_e[env_ids].clone()
         self.prev_left_ee_quat[env_ids] = self.left_ee_quat_w[env_ids].clone()
+
+        # [핵심] 리셋 직후 움직이지 않도록 현재의 실제 관절 위치를 타겟으로 고정하고 속도 제거
+        final_joint_pos = self.robot.data.joint_pos[env_ids][:, self._joint_idx]
+        self.robot.set_joint_position_target(final_joint_pos, self._joint_idx, env_ids)
+        self.robot.write_joint_velocity_to_sim(torch.zeros_like(final_joint_pos), self._joint_idx, env_ids)
+        
+        # 액션 버퍼 비우기
+        self.actions[env_ids] = 0.0
+        self.prev_actions[env_ids] = 0.0
     
     def _step_sim_no_action(self):
         """Step the simulation without an action. Used for resets only."""
@@ -512,7 +609,7 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         target_pin_pos = pin_world_positions[0][env_ids] - self.scene.env_origins[env_ids]
         
         # Add vertical offset to hover above pin (e.g., 5cm above)
-        hover_offset = torch.tensor([0.0, 0.0, 0.05], device=self.device).repeat(len(env_ids), 1)
+        hover_offset = torch.tensor([0.0, 0.0, 0.15], device=self.device).repeat(len(env_ids), 1)
         target_eef_pos = target_pin_pos + hover_offset
         
         # Use downward-facing orientation
@@ -583,87 +680,97 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
     def _apply_action(self) -> None:
         """Apply actions using Differential IK for left arm only."""
         # Compute current EE state for IK
-        self._compute_ee_state_for_ik()
+        # self._compute_ee_state_for_ik()
         
-        # Action space: 4-dim (constrained to downward-facing EEF, gripper always closed)
-        # [0:3] - left arm position delta (x, y, z)
-        # [3:4] - yaw rotation only (pitch and roll are fixed)
+        # # Action space: 4-dim (constrained to downward-facing EEF, gripper always closed)
+        # # [0:3] - left arm position delta (x, y, z)
+        # # [3:4] - yaw rotation only (pitch and roll are fixed)
         
-        # --- Left Arm IK ---
-        left_pos_actions = self.actions[:, 0:3] * self.pos_action_scale
-        left_yaw_action = self.actions[:, 3:4] * self.rot_action_scale[:, 2:3]  # Use only Z component of rot_action_scale
+        # # --- Left Arm IK ---
+        # left_pos_actions = self.actions[:, 0:3] * self.pos_action_scale
+        # left_yaw_action = self.actions[:, 3:4] * self.rot_action_scale[:, 2:3]  # Use only Z component of rot_action_scale
         
-        # Compute target position (current EE pos + delta)
-        ctrl_target_left_ee_pos = self.left_ee_pos_e + left_pos_actions
+        # # Compute target position (current EE pos + delta)
+        # ctrl_target_left_ee_pos = self.left_ee_pos_e + left_pos_actions
         
-        # Apply position bounds clipping (Factory-style)
-        # Get first pin position as reference frame
-        pin_world_positions, _, _, _ = self.get_key_points()
-        first_pin_pos = pin_world_positions[0] - self.scene.env_origins
-        delta_pos = ctrl_target_left_ee_pos - first_pin_pos
-        # Clip XY and Z separately
-        delta_pos_xy_clipped = torch.clamp(delta_pos[:, 0:2], -self.pos_action_bounds[0], self.pos_action_bounds[0])
-        delta_pos_z_clipped = torch.clamp(delta_pos[:, 2:3], -self.pos_action_bounds[1], self.pos_action_bounds[1])
-        delta_pos_clipped = torch.cat([delta_pos_xy_clipped, delta_pos_z_clipped], dim=-1)
-        ctrl_target_left_ee_pos = first_pin_pos + delta_pos_clipped
+        # # Apply position bounds clipping (Factory-style)
+        # # Get first pin position as reference frame
+        # pin_world_positions, _, _, _ = self.get_key_points()
+        # first_pin_pos = pin_world_positions[0] - self.scene.env_origins
+        # delta_pos = ctrl_target_left_ee_pos - first_pin_pos
+        # # Clip XY and Z separately
+        # delta_pos_xy_clipped = torch.clamp(delta_pos[:, 0:2], -self.pos_action_bounds[0], self.pos_action_bounds[0])
+        # delta_pos_z_clipped = torch.clamp(delta_pos[:, 2:3], -self.pos_action_bounds[1], self.pos_action_bounds[1])
+        # delta_pos_clipped = torch.cat([delta_pos_xy_clipped, delta_pos_z_clipped], dim=-1)
+        # ctrl_target_left_ee_pos = first_pin_pos + delta_pos_clipped
         
-        # Apply rotation bounds clipping (Factory-style)
-        left_yaw_action_clipped = torch.clamp(left_yaw_action, -self.rot_action_bounds, self.rot_action_bounds)
+        # # Apply rotation bounds clipping (Factory-style)
+        # left_yaw_action_clipped = torch.clamp(left_yaw_action, -self.rot_action_bounds, self.rot_action_bounds)
         
-        # Convert yaw rotation action to quaternion and apply to current orientation
-        # Only apply yaw rotation, keeping roll and pitch fixed to face downward
-        yaw_angle = left_yaw_action_clipped.squeeze(-1)
-        yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device).repeat(self.num_envs, 1)
-        yaw_rot_quat = torch_utils.quat_from_angle_axis(yaw_angle, yaw_axis)
-        yaw_rot_quat = torch.where(
-            (yaw_angle.unsqueeze(-1).abs().repeat(1, 4)) > 1e-6,
-            yaw_rot_quat,
-            torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(self.num_envs, 1),
-        )
-        # Apply yaw rotation to current orientation
-        ctrl_target_left_ee_quat_temp = torch_utils.quat_mul(yaw_rot_quat, self.left_ee_quat_w)
+        # # Convert yaw rotation action to quaternion and apply to current orientation
+        # # Only apply yaw rotation, keeping roll and pitch fixed to face downward
+        # yaw_angle = left_yaw_action_clipped.squeeze(-1)
+        # yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device).repeat(self.num_envs, 1)
+        # yaw_rot_quat = torch_utils.quat_from_angle_axis(yaw_angle, yaw_axis)
+        # yaw_rot_quat = torch.where(
+        #     (yaw_angle.unsqueeze(-1).abs().repeat(1, 4)) > 1e-6,
+        #     yaw_rot_quat,
+        #     torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(self.num_envs, 1),
+        # )
+        # # Apply yaw rotation to current orientation
+        # ctrl_target_left_ee_quat_temp = torch_utils.quat_mul(yaw_rot_quat, self.left_ee_quat_w)
         
-        # Constrain EEF orientation to always face downward (use helper function)
-        ctrl_target_left_ee_quat = gearbox_assembly_utils.constrain_quat_to_downward(ctrl_target_left_ee_quat_temp, self.device)
+        # # Constrain EEF orientation to always face downward (use helper function)
+        # ctrl_target_left_ee_quat = gearbox_assembly_utils.constrain_quat_to_downward(ctrl_target_left_ee_quat_temp, self.device)
         
-        # Convert target from world to body frame for IK
-        root_pose_w = self.robot.data.root_pose_w
-        ctrl_target_left_ee_pos_w = ctrl_target_left_ee_pos + self.scene.env_origins
-        ctrl_target_left_ee_pos_b, ctrl_target_left_ee_quat_b = subtract_frame_transforms(
-            root_pose_w[:, 0:3], root_pose_w[:, 3:7],
-            ctrl_target_left_ee_pos_w, ctrl_target_left_ee_quat
-        )
+        # # Convert target from world to body frame for IK
+        # root_pose_w = self.robot.data.root_pose_w
+        # ctrl_target_left_ee_pos_w = ctrl_target_left_ee_pos + self.scene.env_origins
+        # ctrl_target_left_ee_pos_b, ctrl_target_left_ee_quat_b = subtract_frame_transforms(
+        #     root_pose_w[:, 0:3], root_pose_w[:, 3:7],
+        #     ctrl_target_left_ee_pos_w, ctrl_target_left_ee_quat
+        # )
         
-        self.left_ik_commands[:, 0:3] = ctrl_target_left_ee_pos_b
-        self.left_ik_commands[:, 3:7] = ctrl_target_left_ee_quat_b
-        self.left_diff_ik_controller.set_command(self.left_ik_commands)
+        # self.left_ik_commands[:, 0:3] = ctrl_target_left_ee_pos_b
+        # self.left_ik_commands[:, 3:7] = ctrl_target_left_ee_quat_b
+        # self.left_diff_ik_controller.set_command(self.left_ik_commands)
         
-        # Get Jacobian for left arm
-        left_jacobian = self.robot.root_physx_view.get_jacobians()[:, self.left_ee_jacobi_idx, :, self._left_arm_joint_idx]
+        # # Get Jacobian for left arm
+        # left_jacobian = self.robot.root_physx_view.get_jacobians()[:, self.left_ee_jacobi_idx, :, self._left_arm_joint_idx]
         
-        # Compute joint position targets using IK
-        self.left_joint_pos_des = self.left_diff_ik_controller.compute(
-            self.left_ee_pos_b, self.left_ee_quat_b, left_jacobian, self.full_joint_pos[:, self._left_arm_joint_idx]
-        )
+        # # Compute joint position targets using IK
+        # self.left_joint_pos_des = self.left_diff_ik_controller.compute(
+        #     self.left_ee_pos_b, self.left_ee_quat_b, left_jacobian, self.full_joint_pos[:, self._left_arm_joint_idx]
+        # )
         
-        # --- Set joint position targets ---
-        self.ctrl_target_joint_pos[:, self._left_arm_joint_idx] = self.left_joint_pos_des
+        # # --- Set joint position targets ---
+        # self.ctrl_target_joint_pos[:, self._left_arm_joint_idx] = self.left_joint_pos_des
         
-        # Gripper control - always closed at 0.0 (Factory-style)
-        self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[0]] = 0.0
-        self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[1]] = 0.0
+        # # Gripper control - always closed at 0.0 (Factory-style)
+        # self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[0]] = 0.0
+        # self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[1]] = 0.0
         
-        # Apply control
-        self.robot.set_joint_position_target(self.ctrl_target_joint_pos)
+        # # Apply control
+        # self.robot.set_joint_position_target(self.ctrl_target_joint_pos)
         
-        # Update visualization markers
-        self._update_markers()
+        # # Update visualization markers
+        # self._update_markers()
         
-        # Update rigid objects
-        sim_dt = self.sim.get_physics_dt()
-        for obj_name, obj in self.obj_dict.items():
-            obj.update(sim_dt)
-    
+        # # Update rigid objects
+        # sim_dt = self.sim.get_physics_dt()
+        # for obj_name, obj in self.obj_dict.items():
+        #     obj.update(sim_dt)
+        self.context.fsm.update()
+        joint_command = self.agent.joint_pos_command # (num_envs, n_joints)
+        joint_ids = self.agent.joint_pos_command_ids
+        if joint_command is not None:
+            self.robot.set_joint_position_target(
+                joint_command, 
+                joint_ids=joint_ids,
+                env_ids=self.robot._ALL_INDICES
+            )
+
+
     def _compute_ee_state_for_ik(self):
         """Compute left EE states in both world and body frames for IK."""
         # Get root pose
