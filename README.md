@@ -2,7 +2,7 @@
 
   # Gearbox Assembly by Galaxea R1
   
-  We participated in Robotic Collaborative Assembling Challenge (RoCo Challenge) - HMI Workshop @ AAAI 2026 
+  Robotic Collaborative Assembling Challenge (RoCo Challenge) - HMI Workshop @ AAAI 2026 
 
   [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html)
   [![IsaacLab](https://img.shields.io/badge/IsaacLab-2.3.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/isaac_lab_tutorials/index.html)
@@ -13,9 +13,12 @@
 ![RoCo Challenge Poster](docs/images/poster.png)
 [RoCo Challenge@AAAI 2026](https://rocochallenge.github.io/RoCo2026/doc.html)
 
+
+https://github.com/user-attachments/assets/25673b1a-7499-461b-abfd-b341789ee4e2
+
 --- 
 
-## 🚀 Getting Started on Docker
+# 🚀 Quick Start on Docker
 
 0. Install [Docker](https://docs.docker.com/desktop/setup/install/linux/), [Docker Compose](https://docs.docker.com/compose/install/linux/#install-using-the-repository), and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
@@ -50,7 +53,7 @@ cd /workspace/isaaclab/source/gearboxAssembly
 python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
 ```
 
-## Getting Started
+# 🚀 Getting Started
 
 ### [Docker 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
 
@@ -144,18 +147,7 @@ source ${ISAAC_ROS_WS}/setup_env.sh
 ./kill.sh
 ```
 
-## Train
-
-```bash
-python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --num_envs=1 --device cpu
-```
-
-```bash
-python scripts/rule_based_agent.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
-python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
-```
-
-# Task
+# Execution
 
 - Task 1
 
@@ -175,6 +167,24 @@ python scripts/jensen_lovers_agent.py --task=Gearbox-Partial-Lackfourth --enable
 python scripts/jensen_lovers_agent.py --task=Gearbox-Recovery-Misplacedfourth --enable_cameras --num_envs=1 --device cpu
 ```
 
-This project is tested in the environment of Docker and Window 11.
+Train
+
+```bash
+python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --num_envs=1 --device cpu
+```
+
+```bash
+python scripts/rule_based_agent.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
+python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
+```
+
+This project is tested in the environment of Docker, Ubuntu 24.04, and Window 11.
 
 ---
+
+# Memo
+
+```bash
+scripts/rule_based_agent.py # ros dependency
+scripts/jensen_lovers_agent.py # no ros dependency
+```
