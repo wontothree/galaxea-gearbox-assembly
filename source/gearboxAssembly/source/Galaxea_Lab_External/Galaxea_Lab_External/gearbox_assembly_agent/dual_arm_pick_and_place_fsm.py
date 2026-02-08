@@ -1,14 +1,11 @@
 from isaaclab.scene import InteractiveScene
 
-from isaaclab.controllers import (
-    DifferentialIKController,
-    DifferentialIKControllerCfg,
-)
-from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import subtract_frame_transforms      # Transformation from world to base coordinate
 
 import isaacsim.core.utils.torch as torch_utils
 import torch
+
+from .utils import create_dual_arm_control_config, solve_inverse_kinematics
 
 from enum import Enum, auto
 class PickAndPlaceState(Enum):
@@ -44,45 +41,7 @@ class DualArmPickAndPlaceFSM:
         self.robot  = scene["robot"]
         self.device = device        
 
-        diff_ik_cfg = DifferentialIKControllerCfg(
-            command_type="pose",              # position and orientation
-            use_relative_mode=False,          # global coordinate (True: relative coordinate)
-            ik_method="dls"                   # damped least squares: inverse kinematics standard solver in assembly task 
-        )
-        self.left_diff_ik_controller = DifferentialIKController(
-            diff_ik_cfg,
-            num_envs=self.scene.num_envs,     # number of parallel environment in Isaac Sim, vectorizated simulation
-            device=self.device                # "cuda": gpu / "cpu": cpu
-        )
-        self.right_diff_ik_controller = DifferentialIKController(
-            diff_ik_cfg,
-            num_envs=self.scene.num_envs,        
-            device=self.device                    
-        )
-
-        # Robot parameter
-        self.left_arm_entity_cfg = SceneEntityCfg(
-            "robot",                          # robot entity name
-            joint_names=["left_arm_joint.*"], # joint entity set
-            body_names=["left_arm_link6"]     # body entity set (ee)
-        )
-        self.right_arm_entity_cfg = SceneEntityCfg(
-            "robot",                         
-            joint_names=["right_arm_joint.*"],
-            body_names=["right_arm_link6"]    
-        )
-        self.left_gripper_entity_cfg = SceneEntityCfg(
-            "robot",
-            joint_names=["left_gripper_axis.*"]
-        )
-        self.right_gripper_entity_cfg = SceneEntityCfg(
-            "robot",
-            joint_names=["right_gripper_axis.*"]
-        )
-        self.left_arm_entity_cfg.resolve(self.scene)
-        self.left_gripper_entity_cfg.resolve(self.scene)
-        self.right_arm_entity_cfg.resolve(self.scene)
-        self.right_gripper_entity_cfg.resolve(self.scene)
+        self.left_diff_ik_controller, self.right_diff_ik_controller, self.left_arm_entity_cfg, self.right_arm_entity_cfg, self.left_gripper_entity_cfg, self.right_gripper_entity_cfg = create_dual_arm_control_config(scene, device)
 
         # Member variables
         # Constants
@@ -147,6 +106,10 @@ class DualArmPickAndPlaceFSM:
             right_ee_quat_b,    
             base_pos_w,
             base_quat_w,    
+            left_arm_joint_pos,
+            right_arm_joint_pos,
+            left_arm_jacobian,
+            right_arm_jacobian,
 
             planetary_carrier_pos_w,
             planetary_carrier_quat_w,
@@ -166,6 +129,10 @@ class DualArmPickAndPlaceFSM:
         self.left_ee_quat_b                   = left_ee_quat_b
         self.right_ee_pos_b                   = right_ee_pos_b
         self.right_ee_quat_b                  = right_ee_quat_b
+        self.left_arm_joint_pos               = left_arm_joint_pos
+        self.right_arm_joint_pos              = right_arm_joint_pos
+        self.left_arm_jacobian                = left_arm_jacobian
+        self.right_arm_jacobian               = right_arm_jacobian
 
         # Object states
         self.planetary_carrier_pos_w          = planetary_carrier_pos_w
@@ -194,70 +161,41 @@ class DualArmPickAndPlaceFSM:
         self.target_place_quat_b         = None
         self.target_place_ready_pos_b    = None
         self.target_place_approach_pos_b = None
-
-    def solve_inverse_kinematics(self,
+    
+    def compute_joint_pos(self,
             arm_name        : str,
             target_ee_pos_b : torch.Tensor,
             target_ee_quat_b: torch.Tensor
         ):
-        """
-        target_ee_pose, current_joint_pose -> desired_joint_pose
-        """
-        robot = self.robot
-        left_ee_pos_b = self.left_ee_pos_b
-        left_ee_quat_b = self.left_ee_quat_b
-        right_ee_pos_b = self.right_ee_pos_b
-        right_ee_quat_b = self.right_ee_quat_b
-        left_arm_entity_cfg = self.left_arm_entity_cfg
-        right_arm_entity_cfg = self.right_arm_entity_cfg
-        left_diff_ik_controller = self.left_diff_ik_controller
-        right_diff_ik_controller = self.right_diff_ik_controller
-
         # Arm selection and configuration
         if arm_name == "left":
-            arm_joint_ids = left_arm_entity_cfg.joint_ids
-            arm_body_ids = left_arm_entity_cfg.body_ids
-            diff_ik_controller = left_diff_ik_controller
+            arm_joint_ids = self.left_arm_entity_cfg.joint_ids
+            arm_joint_pos = self.left_arm_joint_pos
+            arm_jacobian = self.left_arm_jacobian
+            diff_ik_controller = self.left_diff_ik_controller
 
-            ee_pos_b = left_ee_pos_b
-            ee_quat_b = left_ee_quat_b
+            ee_pos_b = self.left_ee_pos_b
+            ee_quat_b = self.left_ee_quat_b
         elif arm_name == "right":
-            arm_joint_ids = right_arm_entity_cfg.joint_ids
-            arm_body_ids = right_arm_entity_cfg.body_ids
-            diff_ik_controller = right_diff_ik_controller
+            arm_joint_ids = self.right_arm_entity_cfg.joint_ids
+            arm_joint_pos = self.right_arm_joint_pos
+            arm_jacobian = self.right_arm_jacobian
+            diff_ik_controller = self.right_diff_ik_controller
 
-            ee_pos_b = right_ee_pos_b
-            ee_quat_b = right_ee_quat_b
-
-        if robot.is_fixed_base:                  # True
-            ee_jacobi_idx = arm_body_ids[0] - 1  # index of end effector jacobian
-        else:
-            ee_jacobi_idx = arm_body_ids[0]
-
-        # Get the target position and orientation of the arm
-        ik_commands = torch.cat(
-            [target_ee_pos_b, target_ee_quat_b], 
-            dim=-1
-        )
-        diff_ik_controller.set_command(ik_commands)
-
-        jacobian = robot.root_physx_view.get_jacobians()[
-            :, ee_jacobi_idx, :, arm_joint_ids
-        ]
-        current_arm_joint_pose = robot.data.joint_pos[    # state space to be able to measured        
-            :, arm_joint_ids
-        ]
-        # compute the joint commands
-        desired_arm_joint_pos = diff_ik_controller.compute(
-            ee_pos_b, 
+            ee_pos_b = self.right_ee_pos_b
+            ee_quat_b = self.right_ee_quat_b
+        
+        return solve_inverse_kinematics(
+            target_ee_pos_b,
+            target_ee_quat_b,
+            arm_joint_ids,
+            arm_joint_pos,
+            arm_jacobian,
+            diff_ik_controller,
+            ee_pos_b,
             ee_quat_b,
-            jacobian, 
-            current_arm_joint_pose
         )
-        desired_arm_joint_ids = arm_joint_ids
-
-        return desired_arm_joint_pos, desired_arm_joint_ids
-
+    
     def transform_world_to_base(self, 
             pos_w: torch.Tensor, 
             quat_w: torch.Tensor
@@ -508,12 +446,12 @@ class DualArmPickAndPlaceFSM:
             quat_w=initial_right_ee_quat_w   
         )
 
-        desired_left_joint_position, desired_left_joint_ids = self.solve_inverse_kinematics( 
+        desired_left_joint_position, desired_left_joint_ids = self.compute_joint_pos( 
             arm_name="left",
             target_ee_pos_b =initial_left_ee_pos_b, 
             target_ee_quat_b=initial_left_ee_quat_b
         )
-        desired_right_joint_position, desired_right_joint_ids = self.solve_inverse_kinematics( 
+        desired_right_joint_position, desired_right_joint_ids = self.compute_joint_pos( 
             arm_name="right",
             target_ee_pos_b =initial_right_ee_pos_b, 
             target_ee_quat_b=initial_right_ee_quat_b
@@ -548,7 +486,7 @@ class DualArmPickAndPlaceFSM:
         target_pick_ready_pos_b = self.target_pick_ready_pos_b
         target_pick_quat_b = self.target_pick_quat_b
 
-        desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+        desired_joint_position, desired_joint_ids = self.compute_joint_pos( 
             arm_name=arm_name,
             target_ee_pos_b=target_pick_ready_pos_b, 
             target_ee_quat_b=target_pick_quat_b
@@ -569,7 +507,7 @@ class DualArmPickAndPlaceFSM:
         target_pick_pos_b = self.target_pick_pos_b
         target_pick_quat_b = self.target_pick_quat_b
 
-        desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+        desired_joint_position, desired_joint_ids = self.compute_joint_pos( 
             arm_name=arm_name,
             target_ee_pos_b=target_pick_pos_b, 
             target_ee_quat_b=target_pick_quat_b
@@ -609,7 +547,7 @@ class DualArmPickAndPlaceFSM:
         target_pick_ready_pos_b = self.target_pick_ready_pos_b
         target_pick_quat_b = self.target_pick_quat_b
 
-        desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics(
+        desired_joint_position, desired_joint_ids = self.compute_joint_pos(
             arm_name        =arm_name,
             target_ee_pos_b =target_pick_ready_pos_b,
             target_ee_quat_b=target_pick_quat_b
@@ -630,7 +568,7 @@ class DualArmPickAndPlaceFSM:
         target_place_ready_pos_b = self.target_place_ready_pos_b
         target_place_quat_b = self.target_place_quat_b
 
-        desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+        desired_joint_position, desired_joint_ids = self.compute_joint_pos( 
             arm_name=arm_name,
             target_ee_pos_b=target_place_ready_pos_b, 
             target_ee_quat_b=target_place_quat_b
@@ -651,7 +589,7 @@ class DualArmPickAndPlaceFSM:
         target_place_approach_pos_b = self.target_place_approach_pos_b
         target_place_quat_b = self.target_place_quat_b
 
-        desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+        desired_joint_position, desired_joint_ids = self.compute_joint_pos( 
             arm_name=arm_name,
             target_ee_pos_b=target_place_approach_pos_b, 
             target_ee_quat_b=target_place_quat_b
@@ -701,7 +639,7 @@ class DualArmPickAndPlaceFSM:
         current_ee_pos_b = torch.lerp(ee_pos_b, self.twist_target_ee_pos_b, alpha)
         
         # B. IK를 통한 기본 관절 각도 계산
-        desired_arm_jpos, desired_arm_ids = self.solve_inverse_kinematics(
+        desired_arm_jpos, desired_arm_ids = self.compute_joint_pos(
             arm_name=arm_name,
             target_ee_pos_b=current_ee_pos_b,
             target_ee_quat_b=target_place_quat_b
@@ -751,7 +689,7 @@ class DualArmPickAndPlaceFSM:
             self.fixed_ee_pos_b, self.fixed_ee_quat_b = ee_pos_b, ee_quat_b
             self.fixed_ee_pos_b[:, 2] += 0.1
 
-        desired_joint_position, desired_joint_ids = self.solve_inverse_kinematics( 
+        desired_joint_position, desired_joint_ids = self.compute_joint_pos( 
             arm_name        =arm_name,
             target_ee_pos_b =self.fixed_ee_pos_b, 
             target_ee_quat_b=self.fixed_ee_quat_b
