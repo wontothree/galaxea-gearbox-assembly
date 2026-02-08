@@ -23,6 +23,9 @@ from isaaclab.markers.config import FRAME_MARKER_CFG
 from .planetary_gear_assembly_env_cfg import PlanetaryGearAssemblyEnvCfg
 from . import gearbox_assembly_utils
 
+from ....gearbox_assembly_agent.agent import GalaxeaGearboxAssemblyAgent
+from ....gearbox_assembly_agent.assembly_fsm import StateMachine, Context, InitializationState
+
 class PlanetaryGearAssemblyEnv(DirectRLEnv):
     cfg: PlanetaryGearAssemblyEnvCfg
 
@@ -102,6 +105,18 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
         self.initial_left_ee_quat_w        = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device).repeat(self.scene.num_envs, 1)
         self.initial_right_ee_pos_e        = torch.tensor([[0.3864, -0.5237, 1.1475]], device=self.device) - self.scene.env_origins
         self.initial_right_ee_quat_w       = torch.tensor([[0.0, -1.0, 0.0, 0.0]], device=self.device).repeat(self.scene.num_envs, 1)
+
+        # ------------------------------------------------------
+        self.agent = GalaxeaGearboxAssemblyAgent(
+            sim=sim_utils.SimulationContext.instance(),
+            scene=self.scene,
+            obj_dict=self.obj_dict
+        )
+        self.context = Context(sim_utils.SimulationContext.instance(), self.agent)
+        initial_state = InitializationState()
+        fsm = StateMachine(initial_state, self.context)
+        self.context.fsm = fsm
+        # ------------------------------------------------------
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -665,87 +680,97 @@ class PlanetaryGearAssemblyEnv(DirectRLEnv):
     def _apply_action(self) -> None:
         """Apply actions using Differential IK for left arm only."""
         # Compute current EE state for IK
-        self._compute_ee_state_for_ik()
+        # self._compute_ee_state_for_ik()
         
-        # Action space: 4-dim (constrained to downward-facing EEF, gripper always closed)
-        # [0:3] - left arm position delta (x, y, z)
-        # [3:4] - yaw rotation only (pitch and roll are fixed)
+        # # Action space: 4-dim (constrained to downward-facing EEF, gripper always closed)
+        # # [0:3] - left arm position delta (x, y, z)
+        # # [3:4] - yaw rotation only (pitch and roll are fixed)
         
-        # --- Left Arm IK ---
-        left_pos_actions = self.actions[:, 0:3] * self.pos_action_scale
-        left_yaw_action = self.actions[:, 3:4] * self.rot_action_scale[:, 2:3]  # Use only Z component of rot_action_scale
+        # # --- Left Arm IK ---
+        # left_pos_actions = self.actions[:, 0:3] * self.pos_action_scale
+        # left_yaw_action = self.actions[:, 3:4] * self.rot_action_scale[:, 2:3]  # Use only Z component of rot_action_scale
         
-        # Compute target position (current EE pos + delta)
-        ctrl_target_left_ee_pos = self.left_ee_pos_e + left_pos_actions
+        # # Compute target position (current EE pos + delta)
+        # ctrl_target_left_ee_pos = self.left_ee_pos_e + left_pos_actions
         
-        # Apply position bounds clipping (Factory-style)
-        # Get first pin position as reference frame
-        pin_world_positions, _, _, _ = self.get_key_points()
-        first_pin_pos = pin_world_positions[0] - self.scene.env_origins
-        delta_pos = ctrl_target_left_ee_pos - first_pin_pos
-        # Clip XY and Z separately
-        delta_pos_xy_clipped = torch.clamp(delta_pos[:, 0:2], -self.pos_action_bounds[0], self.pos_action_bounds[0])
-        delta_pos_z_clipped = torch.clamp(delta_pos[:, 2:3], -self.pos_action_bounds[1], self.pos_action_bounds[1])
-        delta_pos_clipped = torch.cat([delta_pos_xy_clipped, delta_pos_z_clipped], dim=-1)
-        ctrl_target_left_ee_pos = first_pin_pos + delta_pos_clipped
+        # # Apply position bounds clipping (Factory-style)
+        # # Get first pin position as reference frame
+        # pin_world_positions, _, _, _ = self.get_key_points()
+        # first_pin_pos = pin_world_positions[0] - self.scene.env_origins
+        # delta_pos = ctrl_target_left_ee_pos - first_pin_pos
+        # # Clip XY and Z separately
+        # delta_pos_xy_clipped = torch.clamp(delta_pos[:, 0:2], -self.pos_action_bounds[0], self.pos_action_bounds[0])
+        # delta_pos_z_clipped = torch.clamp(delta_pos[:, 2:3], -self.pos_action_bounds[1], self.pos_action_bounds[1])
+        # delta_pos_clipped = torch.cat([delta_pos_xy_clipped, delta_pos_z_clipped], dim=-1)
+        # ctrl_target_left_ee_pos = first_pin_pos + delta_pos_clipped
         
-        # Apply rotation bounds clipping (Factory-style)
-        left_yaw_action_clipped = torch.clamp(left_yaw_action, -self.rot_action_bounds, self.rot_action_bounds)
+        # # Apply rotation bounds clipping (Factory-style)
+        # left_yaw_action_clipped = torch.clamp(left_yaw_action, -self.rot_action_bounds, self.rot_action_bounds)
         
-        # Convert yaw rotation action to quaternion and apply to current orientation
-        # Only apply yaw rotation, keeping roll and pitch fixed to face downward
-        yaw_angle = left_yaw_action_clipped.squeeze(-1)
-        yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device).repeat(self.num_envs, 1)
-        yaw_rot_quat = torch_utils.quat_from_angle_axis(yaw_angle, yaw_axis)
-        yaw_rot_quat = torch.where(
-            (yaw_angle.unsqueeze(-1).abs().repeat(1, 4)) > 1e-6,
-            yaw_rot_quat,
-            torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(self.num_envs, 1),
-        )
-        # Apply yaw rotation to current orientation
-        ctrl_target_left_ee_quat_temp = torch_utils.quat_mul(yaw_rot_quat, self.left_ee_quat_w)
+        # # Convert yaw rotation action to quaternion and apply to current orientation
+        # # Only apply yaw rotation, keeping roll and pitch fixed to face downward
+        # yaw_angle = left_yaw_action_clipped.squeeze(-1)
+        # yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device).repeat(self.num_envs, 1)
+        # yaw_rot_quat = torch_utils.quat_from_angle_axis(yaw_angle, yaw_axis)
+        # yaw_rot_quat = torch.where(
+        #     (yaw_angle.unsqueeze(-1).abs().repeat(1, 4)) > 1e-6,
+        #     yaw_rot_quat,
+        #     torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(self.num_envs, 1),
+        # )
+        # # Apply yaw rotation to current orientation
+        # ctrl_target_left_ee_quat_temp = torch_utils.quat_mul(yaw_rot_quat, self.left_ee_quat_w)
         
-        # Constrain EEF orientation to always face downward (use helper function)
-        ctrl_target_left_ee_quat = gearbox_assembly_utils.constrain_quat_to_downward(ctrl_target_left_ee_quat_temp, self.device)
+        # # Constrain EEF orientation to always face downward (use helper function)
+        # ctrl_target_left_ee_quat = gearbox_assembly_utils.constrain_quat_to_downward(ctrl_target_left_ee_quat_temp, self.device)
         
-        # Convert target from world to body frame for IK
-        root_pose_w = self.robot.data.root_pose_w
-        ctrl_target_left_ee_pos_w = ctrl_target_left_ee_pos + self.scene.env_origins
-        ctrl_target_left_ee_pos_b, ctrl_target_left_ee_quat_b = subtract_frame_transforms(
-            root_pose_w[:, 0:3], root_pose_w[:, 3:7],
-            ctrl_target_left_ee_pos_w, ctrl_target_left_ee_quat
-        )
+        # # Convert target from world to body frame for IK
+        # root_pose_w = self.robot.data.root_pose_w
+        # ctrl_target_left_ee_pos_w = ctrl_target_left_ee_pos + self.scene.env_origins
+        # ctrl_target_left_ee_pos_b, ctrl_target_left_ee_quat_b = subtract_frame_transforms(
+        #     root_pose_w[:, 0:3], root_pose_w[:, 3:7],
+        #     ctrl_target_left_ee_pos_w, ctrl_target_left_ee_quat
+        # )
         
-        self.left_ik_commands[:, 0:3] = ctrl_target_left_ee_pos_b
-        self.left_ik_commands[:, 3:7] = ctrl_target_left_ee_quat_b
-        self.left_diff_ik_controller.set_command(self.left_ik_commands)
+        # self.left_ik_commands[:, 0:3] = ctrl_target_left_ee_pos_b
+        # self.left_ik_commands[:, 3:7] = ctrl_target_left_ee_quat_b
+        # self.left_diff_ik_controller.set_command(self.left_ik_commands)
         
-        # Get Jacobian for left arm
-        left_jacobian = self.robot.root_physx_view.get_jacobians()[:, self.left_ee_jacobi_idx, :, self._left_arm_joint_idx]
+        # # Get Jacobian for left arm
+        # left_jacobian = self.robot.root_physx_view.get_jacobians()[:, self.left_ee_jacobi_idx, :, self._left_arm_joint_idx]
         
-        # Compute joint position targets using IK
-        self.left_joint_pos_des = self.left_diff_ik_controller.compute(
-            self.left_ee_pos_b, self.left_ee_quat_b, left_jacobian, self.full_joint_pos[:, self._left_arm_joint_idx]
-        )
+        # # Compute joint position targets using IK
+        # self.left_joint_pos_des = self.left_diff_ik_controller.compute(
+        #     self.left_ee_pos_b, self.left_ee_quat_b, left_jacobian, self.full_joint_pos[:, self._left_arm_joint_idx]
+        # )
         
-        # --- Set joint position targets ---
-        self.ctrl_target_joint_pos[:, self._left_arm_joint_idx] = self.left_joint_pos_des
+        # # --- Set joint position targets ---
+        # self.ctrl_target_joint_pos[:, self._left_arm_joint_idx] = self.left_joint_pos_des
         
-        # Gripper control - always closed at 0.0 (Factory-style)
-        self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[0]] = 0.0
-        self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[1]] = 0.0
+        # # Gripper control - always closed at 0.0 (Factory-style)
+        # self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[0]] = 0.0
+        # self.ctrl_target_joint_pos[:, self._left_gripper_dof_idx[1]] = 0.0
         
-        # Apply control
-        self.robot.set_joint_position_target(self.ctrl_target_joint_pos)
+        # # Apply control
+        # self.robot.set_joint_position_target(self.ctrl_target_joint_pos)
         
-        # Update visualization markers
-        self._update_markers()
+        # # Update visualization markers
+        # self._update_markers()
         
-        # Update rigid objects
-        sim_dt = self.sim.get_physics_dt()
-        for obj_name, obj in self.obj_dict.items():
-            obj.update(sim_dt)
-    
+        # # Update rigid objects
+        # sim_dt = self.sim.get_physics_dt()
+        # for obj_name, obj in self.obj_dict.items():
+        #     obj.update(sim_dt)
+        self.context.fsm.update()
+        joint_command = self.agent.joint_pos_command # (num_envs, n_joints)
+        joint_ids = self.agent.joint_pos_command_ids
+        if joint_command is not None:
+            self.robot.set_joint_position_target(
+                joint_command, 
+                joint_ids=joint_ids,
+                env_ids=self.robot._ALL_INDICES
+            )
+
+
     def _compute_ee_state_for_ik(self):
         """Compute left EE states in both world and body frames for IK."""
         # Get root pose

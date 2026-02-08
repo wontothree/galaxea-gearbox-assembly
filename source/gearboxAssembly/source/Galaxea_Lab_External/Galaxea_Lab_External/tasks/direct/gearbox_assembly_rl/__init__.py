@@ -2,6 +2,16 @@ import gymnasium as gym
 from . import agents
 
 gym.register(
+    id="Test",
+    entry_point=f"{__name__}.test_env:GalaxeaLabExternalEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.test_cfg:GalaxeaLabExternalEnvCfg",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
+    },
+)
+
+gym.register(
     id="Galaxea-Planetary-Gear-Assembly-v0",
     entry_point=f"{__name__}.planetary_gear_assembly_env:PlanetaryGearAssemblyEnv",
     disable_env_checker=True,
