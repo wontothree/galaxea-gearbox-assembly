@@ -148,19 +148,19 @@ source ${ISAAC_ROS_WS}/setup_env.sh
 - Task 1
 
 ```bash
-python scripts/jensen_lovers_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --num_envs=1 --device cpu
+python scripts/gearbox_assembly_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --num_envs=1 --device cpu
 ```
 
 - Task 2
 
 ```bash
-python scripts/jensen_lovers_agent.py --task=Gearbox-Partial-Lackfourth --enable_cameras --num_envs=1 --device cpu
+python scripts/gearbox_assembly_agent.py --task=Gearbox-Partial-Lackfourth --enable_cameras --num_envs=1 --device cpu
 ```
 
 - Task 3
 
 ```bash
-python scripts/jensen_lovers_agent.py --task=Gearbox-Recovery-Misplacedfourth --enable_cameras --num_envs=1 --device cpu
+python scripts/gearbox_assembly_agent.py --task=Gearbox-Recovery-Misplacedfourth --enable_cameras --num_envs=1 --device cpu
 ```
 
 Train
@@ -180,5 +180,5 @@ This project is tested in the environment of Docker and Window 11.
 
 ```bash
 scripts/rule_based_agent.py # ros dependency
-scripts/jensen_lovers_agent.py # no ros dependency
+scripts/gearbox_assembly_agent.py # no ros dependency
 ```
