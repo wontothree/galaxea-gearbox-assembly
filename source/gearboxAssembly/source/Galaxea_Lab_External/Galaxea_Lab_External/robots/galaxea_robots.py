@@ -212,7 +212,8 @@ GALAXEA_HEAD_CAMERA_CFG = CameraCfg(
     ),
     offset=CameraCfg.OffsetCfg(  # offset from the parent frame
         pos=(0.0, 0.0, 0.0),
-        rot=(1.0, 0.0, 0.0, 0.0),
+        # 30-degree downward tilt (using negative X to account for your frame's orientation)
+        rot=(0.9659, -0.2588, 0.0, 0.0),
         convention="opengl",
     ),
 )

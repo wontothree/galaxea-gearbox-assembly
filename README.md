@@ -55,7 +55,7 @@ python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v
 
 # 🚀 Getting Started
 
-### [Docker 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
+## [Docker 1] Isaac Lab (Ubuntu 24.04, ROS2 Jazzy): Simulation Environment and Agent
 
 1. Create the container or run the container
 
@@ -120,7 +120,7 @@ source /opt/ros/jazzy/setup.bash
 ros2 topic list
 ```
 
-### [Docker 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
+## [Docker 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
 
 1. Build the Docker image of Isaac ROS and run the container
 
@@ -168,6 +168,17 @@ python scripts/jensen_lovers_agent.py --task=Gearbox-Recovery-Misplacedfourth --
 ```
 
 Train
+
+```bash
+python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --num_envs=1 --device cpu
+```
+
+```bash
+python scripts/rule_based_agent.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
+python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
+```
+
+This project is tested in the environment of Docker and Window 11.
 
 ```bash
 python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --num_envs=1 --device cpu

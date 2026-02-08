@@ -1,9 +1,14 @@
 from .dual_arm_pick_and_place_fsm import DualArmPickAndPlaceFSM
+# from .vision import TableSceneAnalyzer
 
 from isaaclab.scene import InteractiveScene
 import isaaclab.sim as sim_utils
-
+from isaaclab.utils.math import subtract_frame_transforms
 from isaaclab.managers import SceneEntityCfg
+
+# Import replicator for direct camera access
+import omni.replicator.core as rep 
+from isaacsim.core.utils.prims import is_prim_path_valid
 
 import isaacsim.core.utils.torch as torch_utils
 import torch
@@ -74,7 +79,25 @@ class GalaxeaGearboxAssemblyAgent:
         self.planetary_reducer_quat_w = None
         self.pin_positions_w = []
         self.pin_quats_w = []
+        # self.vision = TableSceneAnalyzer()
 
+        # # --- NEW: Direct Camera Setup ---
+        # # --- Direct Camera Setup via Replicator ---
+        # self.camera_prim_path = '/World/envs/env_0/Robot/zed_link/head_cam/head_cam'
+        # self.render_product = None
+        
+        # if is_prim_path_valid(self.camera_prim_path):
+        #     # Create a render product for the specific camera prim
+        #     self.render_product = rep.create.render_product(self.camera_prim_path, resolution=(1280, 720))
+        #     # Initialize the annotators we need
+        #     self.rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb")
+        #     self.depth_annotator = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+            
+        #     # Attach the annotators to the render product
+        #     self.rgb_annotator.attach(self.render_product)
+        #     self.depth_annotator.attach(self.render_product)
+        # else:
+        #     print(f"[Warning] Camera prim path {self.camera_prim_path} is invalid!")
         # -------------------------------------------------------------------------------------------------------------------------- #
         # [Function] observe_assembly_state ---------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
@@ -112,12 +135,43 @@ class GalaxeaGearboxAssemblyAgent:
         self.target_pin_pos_w = None
 
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # [Function] DualArmPickAndPlaceFSM ----------------------------------------------------------------------------------------------- #
+        # [Function] DualArmPickAndPlaceFSM ---------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
         self.joint_pos_command           = None
         self.joint_pos_command_ids       = None
         self.dual_arm_pick_and_place_fsm = DualArmPickAndPlaceFSM(scene=scene, device=self.device)
         self.state = None
+
+    def print_gear_groundtruth(self):
+        """
+        Prints the ground truth positions of the planetary gear system components
+        in a structured and readable format.
+        """
+        print("\n" + "="*50)
+        print(f"{'GEAR SYSTEM GROUND TRUTH (Positions)':^50}")
+        print("="*50)
+        print(f"{'Component':<25} | {'X':>7} {'Y':>8} {'Z':>8}")
+        print("-"*50)
+
+        # 1. Print Sun Planetary Gears
+        for i, pos in enumerate(self.sun_planetary_gear_positions_w):
+            # Taking the first element [0] assuming batch size 1 or showing first env
+            coords = pos[0].cpu().numpy()
+            name = f"Sun Planetary Gear {i+1}"
+            print(f"{name:<25} | {coords[0]:8.3f} {coords[1]:8.3f} {coords[2]:8.3f}")
+
+        # 2. Print Other Major Components
+        components = [
+            ("Planetary Carrier", self.planetary_carrier_pos_w),
+            ("Ring Gear",         self.ring_gear_pos_w),
+            ("Planetary Reducer", self.planetary_reducer_pos_w)
+        ]
+
+        for name, pos in components:
+            coords = pos[0].cpu().numpy()
+            print(f"{name:<25} | {coords[0]:8.3f} {coords[1]:8.3f} {coords[2]:8.3f}")
+
+        print("="*50 + "\n")
 
     def observe_robot_state(self):
         """
@@ -129,14 +183,21 @@ class GalaxeaGearboxAssemblyAgent:
         # end effector (simulation ground truth)
         left_arm_body_ids    = self.left_arm_entity_cfg.body_ids
         right_arm_body_ids   = self.right_arm_entity_cfg.body_ids
-        self.left_ee_pos_w   = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
-        self.left_ee_quat_w  = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
-        self.right_ee_pos_w  = self.robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
-        self.right_ee_quat_w = self.robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
-
-        # Base
         self.base_pos_w  = self.robot.data.root_state_w[:, 0:3]
-        self.base_quat_w = self.robot.data.root_state_w[:, 3:7]
+        self.base_quat_w = self.robot.data.root_state_w[:, 3:7]        
+
+        left_ee_pos_w   = self.robot.data.body_state_w[:, left_arm_body_ids[0], 0:3] - env_origins
+        left_ee_quat_w  = self.robot.data.body_state_w[:, left_arm_body_ids[0], 3:7]
+        right_ee_pos_w  = self.robot.data.body_state_w[:, right_arm_body_ids[0], 0:3] - env_origins
+        right_ee_quat_w = self.robot.data.body_state_w[:, right_arm_body_ids[0], 3:7]
+        self.left_ee_pos_b, self.left_ee_quat_b = self.transform_world_to_base(
+            pos_w=left_ee_pos_w,
+            quat_w=left_ee_quat_w
+        )
+        self.right_ee_pos_b, self.right_ee_quat_b = self.transform_world_to_base(
+            pos_w=right_ee_pos_w,
+            quat_w=right_ee_quat_w
+        )
 
     def observe_object_state(self):
         """
@@ -190,6 +251,87 @@ class GalaxeaGearboxAssemblyAgent:
 
             self.pin_positions_w.append(pin_pos)
             self.pin_quats_w.append(pin_quat)
+
+        # Debug: Print ground truth positions (will get overwritten)
+        # self.print_gear_groundtruth()
+
+        # # -------------------------------------------------------------------------------------------------------------------------- #
+        # # 1. Capture and Process Vision Data
+        # if not self.render_product:
+        #     print("[Error] Render product not initialized. Cannot use vision.")
+        #     return
+
+        # rgb_data = self.rgb_annotator.get_data()
+        # depth_data = self.depth_annotator.get_data()
+
+        # if rgb_data is None or depth_data is None or rgb_data.size == 0:
+        #     return
+
+        # # Handle RGBA if necessary
+        # if rgb_data.shape[-1] == 4:
+        #     rgb_data = rgb_data[:, :, :3]
+        
+        # # This populates self.vision.detected_objects
+        # self.vision.process_frame(rgb_data, depth_data)
+        # detected_list = self.vision.detected_objects
+        # # 2. Reset / Prepare State Variables
+        # # We use a default Z or previous state if an object is temporarily occluded
+        # def to_torch(coords):
+        #     return torch.tensor([[coords['x'], coords['y'], coords['z']]], device=self.device)
+
+        # # Temporary lists for multi-instance objects
+        # found_sun_gears = []
+        # found_pins = []
+
+        # # 3. Map Vision Labels to Agent Variables
+        # for obj in detected_list:
+        #     label = obj['label']
+            
+        #     if label == "Planetary Carrier":
+        #         self.planetary_carrier_pos_w = to_torch(obj)
+            
+        #     elif label == "Ring Gear":
+        #         self.ring_gear_pos_w = to_torch(obj)
+            
+        #     elif label == "Planetary Reducer":
+        #         self.planetary_reducer_pos_w = to_torch(obj)
+            
+        #     elif label == "Sun Planetary Gear":
+        #         found_sun_gears.append(to_torch(obj))
+                
+        #     elif label == "Carrier Pin":
+        #         found_pins.append(to_torch(obj))
+
+        # # 4. Handle Sun Planetary Gears (Sort or assign to the 4 specific slots)
+        # # Note: Vision doesn't know 'gear_1' vs 'gear_2', so we update the list 
+        # # based on what is currently visible on the table.
+        # if found_sun_gears:
+        #     self.sun_planetary_gear_positions_w = found_sun_gears
+        #     # Vision currently does not provide 3D orientation (Quaternions), 
+        #     # so we assume identity (upright) for assembly logic.
+        #     self.sun_planetary_gear_quats_w = [
+        #         torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device) 
+        #         for _ in range(len(found_sun_gears))
+        #     ]
+
+        # # 5. Handle Pins
+        # if found_pins:
+        #     self.pin_positions_w = found_pins
+        #     self.pin_quats_w = [
+        #         torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device) 
+        #         for _ in range(len(found_pins))
+        #     ]
+
+        # # 6. Fallback/Consistency: Keep Quaternions for Single Components
+        # # Since TableSceneAnalyzer doesn't return Quaternions, we default them to identity
+        # # so the FSM doesn't crash.
+        # self.planetary_carrier_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
+        # self.ring_gear_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
+        # self.planetary_reducer_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=self.device)
+
+        # # Debug
+        # # self.vision.print_summary()
+
 
     def observe_assembly_state(self):
         # Observe object state
@@ -344,12 +486,13 @@ class GalaxeaGearboxAssemblyAgent:
         self.observe_assembly_state()
 
         self.dual_arm_pick_and_place_fsm.update_observation(
-            left_ee_pos_w                    = self.left_ee_pos_w,
-            left_ee_quat_w                   = self.left_ee_quat_w,
-            right_ee_pos_w                   = self.right_ee_pos_w,
-            right_ee_quat_w                  = self.right_ee_quat_w,
+            left_ee_pos_b                    = self.left_ee_pos_b,
+            left_ee_quat_b                   = self.left_ee_quat_b,
+            right_ee_pos_b                   = self.right_ee_pos_b,
+            right_ee_quat_b                  = self.right_ee_quat_b,
             base_pos_w                       = self.base_pos_w,
-            base_quat_w                      = self.base_quat_w,        
+            base_quat_w                      = self.base_quat_w,      
+
             planetary_carrier_pos_w          = self.planetary_carrier_pos_w,
             planetary_carrier_quat_w         = self.planetary_carrier_quat_w,
             ring_gear_pos_w                  = self.ring_gear_pos_w,
@@ -380,3 +523,21 @@ class GalaxeaGearboxAssemblyAgent:
 
         score = self.num_mounted_planetary_gears + int(self.is_sun_gear_mounted) + int(self.is_ring_gear_mounted) + int(self.is_planetary_reducer_mounted)
         print(f"score: {score}")
+
+    def transform_world_to_base( 
+            self,
+            pos_w: torch.Tensor, 
+            quat_w: torch.Tensor
+        ) -> torch.Tensor:
+        """
+        World frame to base frame
+        """
+        base_pos_w = self.base_pos_w
+        base_quat_w = self.base_quat_w
+        pos_b, quat_b = subtract_frame_transforms(
+            base_pos_w,
+            base_quat_w,
+            pos_w,
+            quat_w
+        )
+        return pos_b, quat_b

@@ -508,7 +508,5 @@ class GalaxeaLabExternalEnv(DirectRLEnv):
         self.robot.write_joint_position_to_sim(joint_pos, self._joint_idx, env_ids)
         self.robot.set_joint_position_target(joint_pos, self._joint_idx, env_ids)
 
-        # self.robot.write_joint_position_to_sim(torch.tensor([28.6479 / 180.0 * math.pi, -45.8366 / 180.0 * math.pi, 28.6479 / 180.0 * math.pi], device=self.device), self._torso_joint_idx, env_ids)
-
-        
+        # self.robot.write_joint_position_to_sim(torch.tensor([28.6479 / 180.0 * math.pi, -45.8366 / 180.0 * math.pi, 28.6479 / 180.0 * math.pi], device=self.device), self._torso_joint_idx, env_ids
 

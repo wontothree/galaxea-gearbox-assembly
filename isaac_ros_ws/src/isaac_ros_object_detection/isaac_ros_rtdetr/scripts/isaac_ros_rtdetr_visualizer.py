@@ -12,7 +12,7 @@
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
+# See the License for the specific language governing permissions andd=
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -51,7 +51,8 @@ class RtDetrVisualizer(Node):
         self._image_subscription = message_filters.Subscriber(
             self,
             Image,
-            'image_rect')
+            'image_rgb')
+
 
         self.time_synchronizer = message_filters.TimeSynchronizer(
             [self._detections_subscription, self._image_subscription],
@@ -61,29 +62,79 @@ class RtDetrVisualizer(Node):
 
     def detections_callback(self, detections_msg, img_msg):
         cv2_img = self._bridge.imgmsg_to_cv2(img_msg)
+        H, W = cv2_img.shape[:2]
+
         for detection in detections_msg.detections:
-            center_x = detection.bbox.center.position.x
-            center_y = detection.bbox.center.position.y
-            width = detection.bbox.size_x
-            height = detection.bbox.size_y
-
             try:
-                min_pt = (round(center_x - (width / 2.0)), round(center_y - (height / 2.0)))
-                max_pt = (round(center_x + (width / 2.0)), round(center_y + (height / 2.0)))
+                # ================================
+                # 1. pixel bbox (Isaac ROS output)
+                # ================================
+                cx = detection.bbox.center.position.x
+                cy = detection.bbox.center.position.y
+                w  = abs(detection.bbox.size_x)
+                h  = abs(detection.bbox.size_y)
 
-                cv2.rectangle(cv2_img, min_pt, max_pt, self.color, self.bbox_thickness)
+                # ================================
+                # 2. cxcywh → xyxy (PIXEL)
+                # ================================
+                x1 = int(cx - w / 2.0)
+                y1 = int(cy - h / 2.0)
+                x2 = int(cx + w / 2.0)
+                y2 = int(cy + h / 2.0)
 
-                cv2.putText(cv2_img, detection.results[0].hypothesis.class_id,
-                            min_pt, self.font, self.font_scale, self.color, self.line_type)
+                # ================================
+                # 3. clipping
+                # ================================
+                x1 = max(0, min(x1, W - 1))
+                y1 = max(0, min(y1, H - 1))
+                x2 = max(0, min(x2, W - 1))
+                y2 = max(0, min(y2, H - 1))
 
-            except ValueError:
-                # Ignore NaNs that may be produced when calculating the bounding box
+                # ================================
+                # 4. label & score
+                # ================================
+                result = detection.results[0]
+                label = result.hypothesis.class_id
+                score = result.hypothesis.score
+
+                # ================================
+                # 5. draw bbox
+                # ================================
+                cv2.rectangle(
+                    cv2_img,
+                    (x1, y1),
+                    (x2, y2),
+                    self.color,
+                    self.bbox_thickness
+                )
+
+                # center (검증용)
+                cv2.circle(
+                    cv2_img,
+                    (int(cx * W), int(cy * H)),
+                    3,
+                    (255, 0, 0),
+                    -1
+                )
+
+                cv2.putText(
+                    cv2_img,
+                    f"{label} {score:.3f}",
+                    (x1, max(y1 - 5, 15)),
+                    self.font,
+                    self.font_scale,
+                    self.color,
+                    self.line_type
+                )
+
+            except (ValueError, IndexError):
                 pass
 
         processed_img = self._bridge.cv2_to_imgmsg(
-            cv2_img, encoding=img_msg.encoding)
+            cv2_img,
+            encoding=img_msg.encoding
+        )
         self._processed_image_pub.publish(processed_img)
-
 
 def main():
     rclpy.init()
