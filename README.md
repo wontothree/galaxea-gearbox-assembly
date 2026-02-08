@@ -14,10 +14,7 @@
 [RoCo Challenge@AAAI 2026](https://rocochallenge.github.io/RoCo2026/doc.html)
 
 
-<video src="./docs/images/demo.mp4"
-       controls
-       width="700">
-</video>
+https://github.com/user-attachments/assets/25673b1a-7499-461b-abfd-b341789ee4e2
 
 --- 
 
@@ -183,4 +180,22 @@ python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 
 
 This project is tested in the environment of Docker and Window 11.
 
+```bash
+python scripts/rl_games/train.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --num_envs=1 --device cpu
+```
+
+```bash
+python scripts/rule_based_agent.py --task=Galaxea-Planetary-Gear-Assembly-v0 --enable_camera --device cpu
+python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_camera --num_envs=1
+```
+
+This project is tested in the environment of Docker, Ubuntu 24.04, and Window 11.
+
 ---
+
+# Memo
+
+```bash
+scripts/rule_based_agent.py # ros dependency
+scripts/jensen_lovers_agent.py # no ros dependency
+```
