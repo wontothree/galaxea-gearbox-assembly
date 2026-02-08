@@ -27,8 +27,8 @@ import isaacsim.core.utils.torch as torch_utils
 from Galaxea_Lab_External.robots import GalaxeaRulePolicy
 from isaaclab.sensors import Camera
 
-from ....jensen_lovers_agent.agent import GalaxeaGearboxAssemblyAgent
-from ....jensen_lovers_agent.assembly_fsm import StateMachine, Context, InitializationState
+from ....gearbox_assembly_agent.agent import GalaxeaGearboxAssemblyAgent
+from ....gearbox_assembly_agent.assembly_fsm import StateMachine, Context, InitializationState
 
 class GalaxeaLabExternalEnv(DirectRLEnv):
     cfg: GalaxeaLabExternalEnvCfg

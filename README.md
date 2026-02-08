@@ -2,17 +2,13 @@
 
   # Gearbox Assembly by Galaxea R1
   
-  Robotic Collaborative Assembling Challenge (RoCo Challenge) - HMI Workshop @ AAAI 2026 
+  Planetary Gear Assemblying by Dual Arm Robot
 
   [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/index.html)
   [![IsaacLab](https://img.shields.io/badge/IsaacLab-2.3.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/latest/isaac_lab_tutorials/index.html)
   [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://docs.python.org/3/whatsnew/3.11.html)
 
 </div>
-
-![RoCo Challenge Poster](docs/images/poster.png)
-[RoCo Challenge@AAAI 2026](https://rocochallenge.github.io/RoCo2026/doc.html)
-
 
 https://github.com/user-attachments/assets/25673b1a-7499-461b-abfd-b341789ee4e2
 
