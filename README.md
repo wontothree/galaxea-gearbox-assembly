@@ -180,8 +180,6 @@ python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 
 
 This project is tested in the environment of Docker and Window 11.
 
----
-
 # Memo
 
 ```bash

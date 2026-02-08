@@ -1,34 +1,32 @@
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sim import SimulationCfg
+from isaaclab.sim import SimulationCfg, PhysxCfg
 from isaaclab.utils import configclass
 from isaaclab.sensors import CameraCfg
 
 OBS_DIM_CFG = {
-    "fingertip_pos": 3,
-    "fingertip_pos_rel_fixed": 3,
-    "fingertip_quat": 4,
+    "ee_pos": 3,
+    "ee_pos_rel_pin": 3,
+    "ee_quat": 4,
     "ee_linvel": 3,
     "ee_angvel": 3,
+    "prev_actions": 4,
 }
 
 STATE_DIM_CFG = {
-    "fingertip_pos": 3,
-    "fingertip_pos_rel_fixed": 3,
-    "fingertip_quat": 4,
+    "ee_pos": 3,
+    "ee_pos_rel_pin": 3,
+    "ee_quat": 4,
     "ee_linvel": 3,
     "ee_angvel": 3,
-    "joint_pos": 7,
-    "held_pos": 3,
-    "held_pos_rel_fixed": 3,
-    "held_quat": 4,
-    "fixed_pos": 3,
-    "fixed_quat": 4,
-    "task_prop_gains": 6,
-    "ema_factor": 1,
-    "pos_threshold": 3,
-    "rot_threshold": 3,
+    "prev_actions": 4,
+    "left_arm_joint_pos": 6,
+    "left_gripper_joint_pos": 2,
+    "gear4_pos": 3,
+    "gear4_pos_rel_pin": 3,
+    "gear4_quat": 4,
+    "pin_pos": 3,
 }
 
 from Galaxea_Lab_External.robots import (
@@ -60,27 +58,48 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
     num_rerenders_on_reset = 5
 
     obs_order: list = [
-        "fingertip_pos_rel_fixed", 
-        "fingertip_quat", 
-        "ee_linvel", 
-        "ee_angvel"
-    ]
-    state_order: list = [
-        "fingertip_pos",
-        "fingertip_quat",
+        "ee_pos",
+        "ee_pos_rel_pin",
+        "ee_quat",
         "ee_linvel",
         "ee_angvel",
-        "joint_pos",
-        "held_pos",
-        "held_pos_rel_fixed",
-        "held_quat",
-        "fixed_pos",
-        "fixed_quat",
+        "prev_actions",
+    ]
+    state_order: list = [
+        "ee_pos",
+        "ee_pos_rel_pin",
+        "ee_quat",
+        "ee_linvel",
+        "ee_angvel",
+        "prev_actions",
+        "left_arm_joint_pos",
+        "left_gripper_joint_pos",
+        "gear4_pos",
+        "gear4_pos_rel_pin",
+        "gear4_quat",
+        "pin_pos",
     ]
 
 
     # simulation
-    sim: SimulationCfg = SimulationCfg(dt=sim_dt, render_interval=decimation)
+    sim: SimulationCfg = SimulationCfg(
+        dt=sim_dt,
+        render_interval=decimation,
+        gravity=(0.0, 0.0, -9.81),
+        physx=PhysxCfg(
+            gpu_found_lost_aggregate_pairs_capacity=2**26,
+            gpu_total_aggregate_pairs_capacity=2**26,
+            gpu_max_rigid_contact_count=2**23,
+            gpu_found_lost_pairs_capacity=2**22,
+            gpu_heap_capacity=2**26,
+            gpu_temp_buffer_capacity=2**24,
+            gpu_max_num_partitions=8,
+            gpu_max_soft_body_contacts=2**20,
+            gpu_max_particle_contacts=2**20,
+            gpu_collision_stack_size=768 * 1024 * 1024,  # 768 MB (increased from 512 MB)
+            gpu_max_rigid_patch_count = 262144 * 2
+        ),
+    )
 
     # robot(s)
     robot_cfg: ArticulationCfg = GALAXEA_R1_CHALLENGE_CFG.replace(prim_path="/World/envs/env_.*/Robot")
@@ -149,7 +168,7 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
     )
 
     # Physics
-    table_friction_coefficient = 0.4
+    table_friction_coefficient = 2.0
     gears_friction_coefficient = 0.01
     gripper_friction_coefficient = 2.0
 
@@ -180,6 +199,11 @@ class GearboxAssemblyBaseEnvCfg(DirectRLEnvCfg):
     # ===== IK settings =====
     ik_method: str = "dls"  # Damped Least Squares
     
-    # ===== Action thresholds =====
-    pos_action_threshold = (0.05, 0.05, 0.05)  # max position delta per step
-    rot_action_threshold = (0.1, 0.1, 0.1)     # max rotation delta per step (rad)
+    # ===== Action scale factors =====
+    pos_action_scale = (0.015, 0.015, 0.015)  # position action scale (meters per normalized action)
+    rot_action_scale = (0.1, 0.1, 0.1)     # rotation action scale (radians per normalized action)
+    
+    # ===== Action smoothing and bounds (Factory-style) =====
+    ema_factor: float = 0.2                    # EMA smoothing for actions [0, 1]
+    pos_action_bounds = (0.05, 0.05)           # max allowed distance from target (x-y, z) in meters
+    rot_action_bounds: float = 0.1             # max allowed rotation from target in radians
