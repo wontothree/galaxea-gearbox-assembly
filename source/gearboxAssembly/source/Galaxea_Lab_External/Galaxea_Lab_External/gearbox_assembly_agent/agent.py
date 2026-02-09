@@ -13,6 +13,8 @@ from isaacsim.core.utils.prims import is_prim_path_valid
 import isaacsim.core.utils.torch as torch_utils
 import torch
 
+from .utils import create_dual_arm_entity_config
+
 class GalaxeaGearboxAssemblyAgent:
     def __init__(self,
             sim: sim_utils.SimulationContext,
@@ -44,19 +46,7 @@ class GalaxeaGearboxAssemblyAgent:
         # -------------------------------------------------------------------------------------------------------------------------- #
         # [Function] observe_robot_state ------------------------------------------------------------------------------------------- #
         # -------------------------------------------------------------------------------------------------------------------------- #
-        # Robot parameter
-        self.left_arm_entity_cfg = SceneEntityCfg(
-            "robot",                            # robot entity name
-            joint_names=[f"left_arm_joint.*"],  # joint entity set
-            body_names=[f"left_arm_link6"]      # body entity set (ee)
-        )
-        self.right_arm_entity_cfg = SceneEntityCfg(
-            "robot",                           
-            joint_names=[f"right_arm_joint.*"],
-            body_names=[f"right_arm_link6"]    
-        )
-        self.left_arm_entity_cfg.resolve(self.scene)
-        self.right_arm_entity_cfg.resolve(self.scene)
+        self.left_arm_entity_cfg, self.right_arm_entity_cfg, self.left_gripper_entity_cfg, self.right_gripper_entity_cfg = create_dual_arm_entity_config(scene)
         
         self.left_ee_pos_w = None
         self.left_ee_quat_w = None
@@ -475,7 +465,6 @@ class GalaxeaGearboxAssemblyAgent:
     def pick_and_place(self, target_object_name):
         self.observe_robot_state()
         self.observe_assembly_state()
-
         self.dual_arm_pick_and_place_fsm.update_observation(
             left_ee_pos_b                    = self.left_ee_pos_b,
             left_ee_quat_b                   = self.left_ee_quat_b,
@@ -487,6 +476,10 @@ class GalaxeaGearboxAssemblyAgent:
             right_arm_joint_pos              = self.right_arm_joint_pos,  
             left_arm_jacobian                = self.left_arm_jacobian,  
             right_arm_jacobian               = self.right_arm_jacobian,
+            left_arm_entity_cfg              = self.left_arm_entity_cfg,
+            right_arm_entity_cfg             = self.right_arm_entity_cfg,
+            left_gripper_entity_cfg          = self.left_gripper_entity_cfg,
+            right_gripper_entity_cfg         = self.right_gripper_entity_cfg,
             
             planetary_carrier_pos_w          = self.planetary_carrier_pos_w,
             planetary_carrier_quat_w         = self.planetary_carrier_quat_w,

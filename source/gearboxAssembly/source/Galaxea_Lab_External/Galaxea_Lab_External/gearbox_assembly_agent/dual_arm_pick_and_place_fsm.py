@@ -5,7 +5,7 @@ from isaaclab.utils.math import subtract_frame_transforms      # Transformation 
 import isaacsim.core.utils.torch as torch_utils
 import torch
 
-from .utils import create_dual_arm_control_config, solve_inverse_kinematics
+from .utils import create_dual_arm_ik_controller, solve_inverse_kinematics
 
 from enum import Enum, auto
 class PickAndPlaceState(Enum):
@@ -28,9 +28,9 @@ class PickAndPlaceState(Enum):
 
 class DualArmPickAndPlaceFSM:
     # Timer constant
-    TIME_CONSTANT_50  = 50
-    TIME_CONSTANT_100 = 100
-    TIME_CONSTANT_150 = 150
+    TIME_CONSTANT_30  = 30
+    TIME_CONSTANT_60 = 60
+    TIME_CONSTANT_60 = 60
 
     STAGING_DURATION  = 30
     PICK_HOLD_TIME    = 20
@@ -38,10 +38,9 @@ class DualArmPickAndPlaceFSM:
 
     def __init__(self, scene: InteractiveScene, device):
         self.scene  = scene
-        self.robot  = scene["robot"]
         self.device = device        
 
-        self.left_diff_ik_controller, self.right_diff_ik_controller, self.left_arm_entity_cfg, self.right_arm_entity_cfg, self.left_gripper_entity_cfg, self.right_gripper_entity_cfg = create_dual_arm_control_config(scene, device)
+        self.left_diff_ik_controller, self.right_diff_ik_controller = create_dual_arm_ik_controller(scene, device)
 
         # Member variables
         # Constants
@@ -110,6 +109,10 @@ class DualArmPickAndPlaceFSM:
             right_arm_joint_pos,
             left_arm_jacobian,
             right_arm_jacobian,
+            left_arm_entity_cfg,
+            right_arm_entity_cfg,
+            left_gripper_entity_cfg,
+            right_gripper_entity_cfg,
 
             planetary_carrier_pos_w,
             planetary_carrier_quat_w,
@@ -133,6 +136,10 @@ class DualArmPickAndPlaceFSM:
         self.right_arm_joint_pos              = right_arm_joint_pos
         self.left_arm_jacobian                = left_arm_jacobian
         self.right_arm_jacobian               = right_arm_jacobian
+        self.left_arm_entity_cfg              = left_arm_entity_cfg
+        self.right_arm_entity_cfg             = right_arm_entity_cfg
+        self.left_gripper_entity_cfg          = left_gripper_entity_cfg
+        self.right_gripper_entity_cfg         = right_gripper_entity_cfg
 
         # Object states
         self.planetary_carrier_pos_w          = planetary_carrier_pos_w
@@ -477,7 +484,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] STAGING -> PICK_READY
         self.timer += 1
-        if self.timer > self.TIME_CONSTANT_50:
+        if self.timer > self.TIME_CONSTANT_30:
             self.timer = 0
             self.state = PickAndPlaceState.PICK_READY
 
@@ -497,8 +504,8 @@ class DualArmPickAndPlaceFSM:
         # [State Transition] PICK_READY -> PICK_APPROACH
         self.timer += 1
         if (self.is_ee_reached_to(target_pos_b=target_pick_ready_pos_b) and 
-            self.timer > self.TIME_CONSTANT_50 or 
-            self.timer > self.TIME_CONSTANT_150):
+            self.timer > self.TIME_CONSTANT_30 or 
+            self.timer > self.TIME_CONSTANT_60):
             self.timer = 0
             self.state = PickAndPlaceState.PICK_APPROACH
 
@@ -518,8 +525,8 @@ class DualArmPickAndPlaceFSM:
         # [State Transition] PICK_APPROACH -> PICK_EXECUTION
         self.timer += 1
         if (self.is_ee_reached_to(target_pos_b=target_pick_pos_b) and 
-            self.timer > self.TIME_CONSTANT_100 or 
-            self.timer > self.TIME_CONSTANT_150):
+            self.timer > self.TIME_CONSTANT_60 or 
+            self.timer > self.TIME_CONSTANT_60):
             self.timer = 0
             self.state = PickAndPlaceState.PICK_EXECUTION
 
@@ -538,7 +545,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] PICK_EXECUTION -> PICK_COMPLETE
         self.timer += 1
-        if self.timer > self.TIME_CONSTANT_100:
+        if self.timer > self.TIME_CONSTANT_60:
             self.timer = 0
             self.state = PickAndPlaceState.PICK_COMPLETE
 
@@ -558,8 +565,8 @@ class DualArmPickAndPlaceFSM:
         # [State Transition] PICK_COMPLETE -> PLACE_READY
         self.timer += 1
         if (self.is_ee_reached_to(target_pos_b=target_pick_ready_pos_b) and 
-            self.timer > self.TIME_CONSTANT_50 or
-            self.timer > self.TIME_CONSTANT_150):
+            self.timer > self.TIME_CONSTANT_30 or
+            self.timer > self.TIME_CONSTANT_60):
             self.timer = 0
             self.state = PickAndPlaceState.PLACE_READY
 
@@ -579,8 +586,8 @@ class DualArmPickAndPlaceFSM:
         # [State Transition] PLACE_READY -> PLACE_APPROACH
         self.timer += 1
         if (self.is_ee_reached_to(target_pos_b=target_place_ready_pos_b) and 
-            self.timer > self.TIME_CONSTANT_50 or 
-            self.timer > self.TIME_CONSTANT_150):
+            self.timer > self.TIME_CONSTANT_30 or 
+            self.timer > self.TIME_CONSTANT_60):
             self.timer = 0
             self.state = PickAndPlaceState.PLACE_APPROACH
 
@@ -600,8 +607,8 @@ class DualArmPickAndPlaceFSM:
         # [State Transition] PLACE_APPROACH -> PLACE_EXECUTION
         self.timer += 1
         if (self.is_ee_reached_to(target_pos_b=target_place_approach_pos_b) and 
-            self.timer > self.TIME_CONSTANT_100 or
-            self.timer > self.TIME_CONSTANT_150):
+            self.timer > self.TIME_CONSTANT_60 or
+            self.timer > self.TIME_CONSTANT_60):
             self.timer = 0
 
             if self.target_object_name == "planetary_gear":
@@ -622,30 +629,20 @@ class DualArmPickAndPlaceFSM:
             rot_deg = 30
             TWIST_TIME = 80
 
-        # 2. 초기 상태 저장 (상태 진입 첫 프레임)
-        if self.timer == 0:
-            # 현재 팔의 모든 관절 각도 저장
-            arm_joint_ids = self.left_arm_entity_cfg.joint_ids if arm_name == "left" else self.right_arm_entity_cfg.joint_ids
-            self.step_initial_joint_pos = self.robot.data.joint_pos[:, arm_joint_ids].clone()
-            
+        if self.timer == 0:            
             self.twist_target_ee_pos_b = ee_pos_b
             self.twist_target_ee_pos_b[:, 2] -= insertion_depth # 아래로 더 삽입
 
-        # 3. 보간(Interpolation) 비율 계산 (0.0 ~ 1.0)
         alpha = min(self.timer / TWIST_TIME, 1.0)
-
-        # 4. 하이브리드 제어: IK(위치) + Joint(회전)
-        # A. 위치 제어 (천천히 아래로 삽입)
         current_ee_pos_b = torch.lerp(ee_pos_b, self.twist_target_ee_pos_b, alpha)
         
-        # B. IK를 통한 기본 관절 각도 계산
         desired_arm_jpos, desired_arm_ids = self.compute_joint_pos(
             arm_name=arm_name,
             target_ee_pos_b=current_ee_pos_b,
             target_ee_quat_b=target_place_quat_b
         )
 
-        # C. 회전 추가 (마지막 축인 인덱스 5번에 회전각 누적)
+        # Rotation
         delta_rot_rad = (rot_deg * torch.pi / 180.0) * alpha
 
         wiggle_amplitude = 15.0 * torch.pi / 180.0  # 5도 정도의 진동
@@ -677,7 +674,7 @@ class DualArmPickAndPlaceFSM:
 
         # [State Transition] PLACE_EXECUTION -> PLACE_COMPLETE
         self.timer += 1
-        if self.timer > self.TIME_CONSTANT_100:
+        if self.timer > self.TIME_CONSTANT_60:
             self.timer = 0
             self.state = PickAndPlaceState.PLACE_COMPLETE
 
@@ -700,13 +697,13 @@ class DualArmPickAndPlaceFSM:
         # [State Transition] PLACE_COMPLETE -> FINALIZATION
         self.timer += 1
         if (self.is_ee_reached_to(target_pos_b=self.fixed_ee_pos_b) and 
-            self.timer > self.TIME_CONSTANT_50 or
-            self.timer > self.TIME_CONSTANT_150):
+            self.timer > self.TIME_CONSTANT_30 or
+            self.timer > self.TIME_CONSTANT_60):
             self.timer = 0
             self.state = PickAndPlaceState.FINALIZATION
 
     def _state_finalization(self):
         self.timer += 1
-        if self.timer > self.TIME_CONSTANT_50:
+        if self.timer > self.TIME_CONSTANT_30:
             self.reset()
             self.state = PickAndPlaceState.INITIALIZATION

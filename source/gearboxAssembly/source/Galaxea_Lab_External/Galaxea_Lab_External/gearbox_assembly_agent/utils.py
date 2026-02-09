@@ -5,7 +5,7 @@ from isaaclab.controllers import (
 )
 from isaaclab.managers import SceneEntityCfg
 
-def create_dual_arm_control_config(scene, device):
+def create_dual_arm_ik_controller(scene, device):
     diff_ik_cfg = DifferentialIKControllerCfg(
         command_type="pose",              # position and orientation
         use_relative_mode=False,          # global coordinate (True: relative coordinate)
@@ -22,7 +22,9 @@ def create_dual_arm_control_config(scene, device):
         device=device                    
     )
 
-    # Robot parameter
+    return left_diff_ik_controller, right_diff_ik_controller
+
+def create_dual_arm_entity_config(scene):
     left_arm_entity_cfg = SceneEntityCfg(
         "robot",                          # robot entity name
         joint_names=["left_arm_joint.*"], # joint entity set
@@ -46,7 +48,7 @@ def create_dual_arm_control_config(scene, device):
     right_arm_entity_cfg.resolve(scene)
     right_gripper_entity_cfg.resolve(scene)
 
-    return left_diff_ik_controller, right_diff_ik_controller, left_arm_entity_cfg, right_arm_entity_cfg, left_gripper_entity_cfg, right_gripper_entity_cfg
+    return left_arm_entity_cfg, right_arm_entity_cfg, left_gripper_entity_cfg, right_gripper_entity_cfg
 
 def solve_inverse_kinematics(
         target_ee_pos_b,
