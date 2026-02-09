@@ -30,7 +30,7 @@ git clone https://github.com/wontothree/galaxea-gearbox-assembly.git
 2. Create the Docker container and run the container
 
 ```bash
-cd galaxea-gearbox-assembly
+# cd galaxea-gearbox-assembly
 ./docker/container.py start base
 ./docker/container.py enter base
 ```
@@ -38,15 +38,15 @@ cd galaxea-gearbox-assembly
 3. Install dependencies
 
 ```bash
-cd /workspace/isaaclab/source/gearboxAssembly
+# cd /workspace/isaaclab/source/gearboxAssembly
 python -m pip install -e source/Galaxea_Lab_External
 ```
 
 4. Run the Policy in the IsaacLab
 
 ```bash
-cd /workspace/isaaclab/source/gearboxAssembly
-python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
+# cd /workspace/isaaclab/source/gearboxAssembly
+python scripts/gearbox_assembly_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --num_envs=1 --device cpu
 ```
 
 # 🚀 Getting Started
@@ -56,7 +56,7 @@ python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v
 1. Create the container or run the container
 
 ```bash
-cd galaxe1-gearbox-assembly
+# cd galaxe1-gearbox-assembly
 ./docker/container.py start ros2 # --suffix [container_name]
 # or
 ./docker/container.py enter ros2 # --suffix [container_name]
@@ -71,14 +71,14 @@ ros2 topic list
 2. Install dependencies
 
 ```bash
-cd /galaxea-gearbox-assembly/source/gearboxAssembly
+# cd /galaxea-gearbox-assembly/source/gearboxAssembly
 python -m pip install -e source/Galaxea_Lab_External
 ```
 
 3. Run the simulation
 
 ```bash
-cd source/gearboxAssembly
+# cd source/gearboxAssembly
 python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
 ```
 
@@ -179,6 +179,8 @@ This project is tested in the environment of Docker and Window 11.
 # Memo
 
 ```bash
-scripts/rule_based_agent.py # ros dependency
 scripts/gearbox_assembly_agent.py # no ros dependency
+
+# ros dependency
+python scripts/rule_based_agent.py --task=Template-Galaxea-Lab-External-Direct-v0 --enable_cameras --device cpu
 ```
