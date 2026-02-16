@@ -56,7 +56,7 @@ python scripts/gearbox_assembly_agent.py --task=Template-Galaxea-Lab-External-Di
 1. Create the container or run the container
 
 ```bash
-# cd galaxe1-gearbox-assembly
+# cd galaxea-gearbox-assembly
 ./docker/container.py start ros2 # --suffix [container_name]
 # or
 ./docker/container.py enter ros2 # --suffix [container_name]
@@ -116,34 +116,7 @@ source /opt/ros/jazzy/setup.bash
 ros2 topic list
 ```
 
-### [Docker 2] Isaac ROS (Ubuntu 24.04, ROS2 Jazzy): Foundation Pose
-
-1. Build the Docker image of Isaac ROS and run the container
-
-```bash
-cd galaxea-gearbox-assembly/isaac_ros_docker
-docker build -t isaac_ros .
-./run.sh
-```
-
-2. Open the additional window on the same container
-
-```bash
-./run.sh
-```
-
-3. Setup environment
-
-```bash
-source ${ISAAC_ROS_WS}/setup_env.sh
-```
-
-4. Kill
-```bash
-./kill.sh
-```
-
-# Execution
+## Execution
 
 - Task 1
 
@@ -176,7 +149,7 @@ python scripts/rl_games/train.py --task=Template-Galaxea-Lab-External-Direct-v0 
 
 This project is tested in the environment of Docker and Window 11.
 
-# Memo
+## Memo
 
 ```bash
 scripts/gearbox_assembly_agent.py # no ros dependency

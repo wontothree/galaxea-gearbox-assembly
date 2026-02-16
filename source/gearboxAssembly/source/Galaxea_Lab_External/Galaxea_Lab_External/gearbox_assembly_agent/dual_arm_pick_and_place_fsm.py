@@ -28,7 +28,7 @@ class PickAndPlaceState(Enum):
 
 class DualArmPickAndPlaceFSM:
     # Timer constant
-    TIME_CONSTANT_30  = 30
+    TIME_CONSTANT_30  = 40
     TIME_CONSTANT_60 = 60
     TIME_CONSTANT_60 = 60
 
